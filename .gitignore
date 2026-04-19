@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+
+# Node
+node_modules/
+frontend/dist/
+
+# Frontend build output (committed separately or via release)
+custom_components/splitsmart/frontend/splitsmart-card.js
+
+# Home Assistant
+custom_components/*/
+!custom_components/splitsmart/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+!.vscode/extensions.json

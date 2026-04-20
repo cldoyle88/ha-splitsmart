@@ -13,8 +13,9 @@ check_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-# Exclude HA-framework tests from the default run; they need Linux + phcc.
-# Run with: pytest -m ha_integration
+# Exclude HA-framework tests from the default local run (Windows dev flow —
+# phcc imports fcntl which is POSIX-only). CI overrides this with -m "" so
+# all 100 tests execute. See .github/workflows/test.yml.
 addopts = "-m 'not ha_integration'"
 markers = ["ha_integration: requires pytest-homeassistant-custom-component on Linux"]
 

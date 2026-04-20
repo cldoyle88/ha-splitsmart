@@ -1,4 +1,5 @@
 """Splitsmart integration setup."""
+
 from __future__ import annotations
 
 import logging
@@ -69,13 +70,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Register services once (guarded so reloads don't double-register)
     if not hass.services.has_service(DOMAIN, "add_expense"):
-        from .services import async_register_services  # noqa: PLC0415
+        from .services import async_register_services
+
         async_register_services(hass)
 
     # Invalidate coordinator when options change
-    async def _async_options_updated(
-        hass: HomeAssistant, entry: ConfigEntry
-    ) -> None:
+    async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:
         new_home_currency = entry.options.get(CONF_HOME_CURRENCY, entry.data[CONF_HOME_CURRENCY])
         new_categories = entry.options.get(CONF_CATEGORIES, entry.data[CONF_CATEGORIES])
         coordinator.home_currency = new_home_currency
@@ -96,7 +96,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass.data[DOMAIN].pop(entry.entry_id)
         # Deregister services when last entry unloads
         if not hass.data[DOMAIN]:
-            from .services import async_unregister_services  # noqa: PLC0415
+            from .services import async_unregister_services
+
             async_unregister_services(hass)
 
     return unload_ok

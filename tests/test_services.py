@@ -3,6 +3,7 @@
 Calls handler functions directly with mock ServiceCall objects — no HA
 event loop or hass fixture needed.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -14,7 +15,6 @@ import pytest
 
 from custom_components.splitsmart.const import DOMAIN
 from custom_components.splitsmart.coordinator import SplitsmartCoordinator
-from custom_components.splitsmart.storage import SplitsmartStorage
 
 # Import handler functions directly
 from custom_components.splitsmart.services import (
@@ -25,7 +25,7 @@ from custom_components.splitsmart.services import (
     _handle_edit_expense,
     _handle_edit_settlement,
 )
-
+from custom_components.splitsmart.storage import SplitsmartStorage
 
 # ------------------------------------------------------------------ fixtures
 
@@ -40,12 +40,14 @@ async def storage(tmp_path: pathlib.Path) -> SplitsmartStorage:
 @pytest.fixture
 async def coordinator(storage: SplitsmartStorage) -> SplitsmartCoordinator:
     from unittest.mock import MagicMock
+
     hass = MagicMock()
     hass.bus = MagicMock()
     hass.bus.async_fire = MagicMock()
 
     coord = SplitsmartCoordinator(
-        hass, storage,
+        hass,
+        storage,
         participants=["u1", "u2"],
         home_currency="GBP",
         categories=["Groceries", "Household", "Alcohol"],
@@ -59,7 +61,9 @@ async def coordinator(storage: SplitsmartStorage) -> SplitsmartCoordinator:
 
 def _make_hass(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator) -> MagicMock:
     hass = MagicMock()
-    hass.data = {DOMAIN: {"test_entry": {"storage": storage, "coordinator": coordinator, "entry": None}}}
+    hass.data = {
+        DOMAIN: {"test_entry": {"storage": storage, "coordinator": coordinator, "entry": None}}
+    }
     return hass
 
 
@@ -80,9 +84,30 @@ def _tesco_data() -> dict[str, Any]:
         "amount": 82.40,
         "currency": "GBP",
         "categories": [
-            {"name": "Groceries", "home_amount": 55.20, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}},
-            {"name": "Household", "home_amount": 18.70, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}},
-            {"name": "Alcohol", "home_amount": 8.50, "split": {"method": "exact", "shares": [{"user_id": "u1", "value": 8.50}, {"user_id": "u2", "value": 0.00}]}},
+            {
+                "name": "Groceries",
+                "home_amount": 55.20,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            },
+            {
+                "name": "Household",
+                "home_amount": 18.70,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            },
+            {
+                "name": "Alcohol",
+                "home_amount": 8.50,
+                "split": {
+                    "method": "exact",
+                    "shares": [{"user_id": "u1", "value": 8.50}, {"user_id": "u2", "value": 0.00}],
+                },
+            },
         ],
     }
 
@@ -104,18 +129,24 @@ async def test_add_expense_tesco(storage: SplitsmartStorage, coordinator: Splits
     assert coordinator.data.balances["u2"] == Decimal("-36.95")
 
 
-async def test_add_expense_monthly_spending_attributes(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+async def test_add_expense_monthly_spending_attributes(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
     hass = _make_hass(storage, coordinator)
     await _handle_add_expense(_make_call(hass, _tesco_data()))
 
     from custom_components.splitsmart.ledger import compute_monthly_spending
+
     result = compute_monthly_spending(coordinator.data.expenses, "u1", 2026, 4)
     assert result["by_category"]["Alcohol"] == Decimal("8.50")
     assert result["by_category"]["Groceries"] == Decimal("27.60")
 
 
-async def test_add_expense_foreign_currency_rejected(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+async def test_add_expense_foreign_currency_rejected(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
     from homeassistant.exceptions import ServiceValidationError
+
     hass = _make_hass(storage, coordinator)
     data = _tesco_data()
     data["currency"] = "USD"
@@ -123,8 +154,11 @@ async def test_add_expense_foreign_currency_rejected(storage: SplitsmartStorage,
         await _handle_add_expense(_make_call(hass, data))
 
 
-async def test_add_expense_non_participant_paid_by_rejected(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+async def test_add_expense_non_participant_paid_by_rejected(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
     from homeassistant.exceptions import ServiceValidationError
+
     hass = _make_hass(storage, coordinator)
     data = _tesco_data()
     data["paid_by"] = "stranger"
@@ -132,8 +166,11 @@ async def test_add_expense_non_participant_paid_by_rejected(storage: SplitsmartS
         await _handle_add_expense(_make_call(hass, data))
 
 
-async def test_add_expense_non_participant_caller_rejected(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+async def test_add_expense_non_participant_caller_rejected(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
     from homeassistant.exceptions import ServiceValidationError
+
     hass = _make_hass(storage, coordinator)
     with pytest.raises(ServiceValidationError, match="participant"):
         await _handle_add_expense(_make_call(hass, _tesco_data(), user_id="intruder"))
@@ -142,16 +179,23 @@ async def test_add_expense_non_participant_caller_rejected(storage: SplitsmartSt
 # ------------------------------------------------------------------ add_settlement
 
 
-async def test_add_settlement_reduces_balance(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+async def test_add_settlement_reduces_balance(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
     hass = _make_hass(storage, coordinator)
     await _handle_add_expense(_make_call(hass, _tesco_data()))
 
-    result = await _handle_add_settlement(_make_call(hass, {
-        "date": "2026-04-20",
-        "from_user": "u2",
-        "to_user": "u1",
-        "amount": 36.95,
-    }))
+    result = await _handle_add_settlement(
+        _make_call(
+            hass,
+            {
+                "date": "2026-04-20",
+                "from_user": "u2",
+                "to_user": "u1",
+                "amount": 36.95,
+            },
+        )
+    )
     assert result["id"].startswith("sl_")
     assert coordinator.data.balances.get("u1", Decimal("0")) == Decimal("0.00")
     assert coordinator.data.balances.get("u2", Decimal("0")) == Decimal("0.00")
@@ -167,20 +211,35 @@ async def test_edit_expense_new_record_before_tombstone(
     add_result = await _handle_add_expense(_make_call(hass, _tesco_data()))
     original_id = add_result["id"]
 
-    edit_result = await _handle_edit_expense(_make_call(hass, {
-        "id": original_id,
-        "date": "2026-04-15",
-        "description": "Tesco Metro (corrected)",
-        "paid_by": "u1",
-        "amount": 50.00,
-        "categories": [
-            {"name": "Groceries", "home_amount": 50.00, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}},
-        ],
-    }))
+    edit_result = await _handle_edit_expense(
+        _make_call(
+            hass,
+            {
+                "id": original_id,
+                "date": "2026-04-15",
+                "description": "Tesco Metro (corrected)",
+                "paid_by": "u1",
+                "amount": 50.00,
+                "categories": [
+                    {
+                        "name": "Groceries",
+                        "home_amount": 50.00,
+                        "split": {
+                            "method": "equal",
+                            "shares": [
+                                {"user_id": "u1", "value": 50},
+                                {"user_id": "u2", "value": 50},
+                            ],
+                        },
+                    },
+                ],
+            },
+        )
+    )
     new_id = edit_result["id"]
     assert new_id != original_id
 
-    # expenses.jsonl: original then new (new written first by amendment 5, but original was written on add)
+    # expenses.jsonl: original first, new appended after (new record written before tombstone)
     all_expenses = await storage.read_all(storage.expenses_path)
     assert len(all_expenses) == 2
     assert all_expenses[1]["id"] == new_id  # new appended after original
@@ -197,18 +256,38 @@ async def test_edit_expense_new_record_before_tombstone(
     assert coordinator.data.balances["u1"] == Decimal("25.00")
 
 
-async def test_edit_expense_nonexistent_raises(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+async def test_edit_expense_nonexistent_raises(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
     from homeassistant.exceptions import ServiceValidationError
+
     hass = _make_hass(storage, coordinator)
     with pytest.raises(ServiceValidationError, match="not found"):
-        await _handle_edit_expense(_make_call(hass, {
-            "id": "ex_ghost",
-            "date": "2026-04-15",
-            "description": "X",
-            "paid_by": "u1",
-            "amount": 10.00,
-            "categories": [{"name": "Groceries", "home_amount": 10.00, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}}],
-        }))
+        await _handle_edit_expense(
+            _make_call(
+                hass,
+                {
+                    "id": "ex_ghost",
+                    "date": "2026-04-15",
+                    "description": "X",
+                    "paid_by": "u1",
+                    "amount": 10.00,
+                    "categories": [
+                        {
+                            "name": "Groceries",
+                            "home_amount": 10.00,
+                            "split": {
+                                "method": "equal",
+                                "shares": [
+                                    {"user_id": "u1", "value": 50},
+                                    {"user_id": "u2", "value": 50},
+                                ],
+                            },
+                        }
+                    ],
+                },
+            )
+        )
 
 
 # ------------------------------------------------------------------ delete_expense
@@ -229,8 +308,11 @@ async def test_delete_expense_tombstones_and_zeros_balance(
     assert coordinator.data.balances.get("u1", Decimal("0")) == Decimal("0")
 
 
-async def test_delete_expense_nonexistent_raises(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+async def test_delete_expense_nonexistent_raises(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
     from homeassistant.exceptions import ServiceValidationError
+
     hass = _make_hass(storage, coordinator)
     with pytest.raises(ServiceValidationError, match="not found"):
         await _handle_delete_expense(_make_call(hass, {"id": "ex_ghost"}))
@@ -242,18 +324,31 @@ async def test_delete_expense_nonexistent_raises(storage: SplitsmartStorage, coo
 async def test_edit_settlement(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
     hass = _make_hass(storage, coordinator)
     await _handle_add_expense(_make_call(hass, _tesco_data()))
-    add_sl = await _handle_add_settlement(_make_call(hass, {
-        "date": "2026-04-20", "from_user": "u2", "to_user": "u1", "amount": 20.00,
-    }))
+    add_sl = await _handle_add_settlement(
+        _make_call(
+            hass,
+            {
+                "date": "2026-04-20",
+                "from_user": "u2",
+                "to_user": "u1",
+                "amount": 20.00,
+            },
+        )
+    )
     sl_id = add_sl["id"]
 
-    edit_result = await _handle_edit_settlement(_make_call(hass, {
-        "id": sl_id,
-        "date": "2026-04-20",
-        "from_user": "u2",
-        "to_user": "u1",
-        "amount": 36.95,
-    }))
+    edit_result = await _handle_edit_settlement(
+        _make_call(
+            hass,
+            {
+                "id": sl_id,
+                "date": "2026-04-20",
+                "from_user": "u2",
+                "to_user": "u1",
+                "amount": 36.95,
+            },
+        )
+    )
     assert edit_result["id"] != sl_id
 
     tombstones = await storage.read_all(storage.tombstones_path)
@@ -263,9 +358,17 @@ async def test_edit_settlement(storage: SplitsmartStorage, coordinator: Splitsma
 async def test_delete_settlement(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
     hass = _make_hass(storage, coordinator)
     await _handle_add_expense(_make_call(hass, _tesco_data()))
-    add_sl = await _handle_add_settlement(_make_call(hass, {
-        "date": "2026-04-20", "from_user": "u2", "to_user": "u1", "amount": 36.95,
-    }))
+    add_sl = await _handle_add_settlement(
+        _make_call(
+            hass,
+            {
+                "date": "2026-04-20",
+                "from_user": "u2",
+                "to_user": "u1",
+                "amount": 36.95,
+            },
+        )
+    )
     sl_id = add_sl["id"]
 
     del_result = await _handle_delete_settlement(_make_call(hass, {"id": sl_id}))

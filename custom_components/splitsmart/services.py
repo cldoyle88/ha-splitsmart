@@ -1,4 +1,5 @@
 """Service handlers for Splitsmart."""
+
 from __future__ import annotations
 
 import logging
@@ -144,9 +145,7 @@ def _resolve_caller(call: ServiceCall, participants: list[str]) -> str:
         _LOGGER.debug("Service called without user context; defaulting to first participant")
         return participants[0]
     if caller not in participants:
-        raise ServiceValidationError(
-            f"User {caller!r} is not a configured Splitsmart participant"
-        )
+        raise ServiceValidationError(f"User {caller!r} is not a configured Splitsmart participant")
     return caller
 
 
@@ -245,7 +244,11 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
 
     target_id = data["id"]
     existing = next(
-        (e for e in (coordinator.data.expenses if coordinator.data else []) if e["id"] == target_id),
+        (
+            e
+            for e in (coordinator.data.expenses if coordinator.data else [])
+            if e["id"] == target_id
+        ),
         None,
     )
     if existing is None:
@@ -302,7 +305,11 @@ async def _handle_delete_expense(call: ServiceCall) -> dict[str, Any]:
 
     target_id = data["id"]
     existing = next(
-        (e for e in (coordinator.data.expenses if coordinator.data else []) if e["id"] == target_id),
+        (
+            e
+            for e in (coordinator.data.expenses if coordinator.data else [])
+            if e["id"] == target_id
+        ),
         None,
     )
     if existing is None:

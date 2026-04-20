@@ -1,4 +1,5 @@
 """Config flow and options flow for Splitsmart."""
+
 from __future__ import annotations
 
 import logging
@@ -23,24 +24,158 @@ from .const import (
 _LOGGER = logging.getLogger(__name__)
 
 # ISO-4217 codes available in the currency picker (common first, then alphabetical)
-_ALL_CURRENCIES = COMMON_CURRENCIES + [
-    "AED", "AFN", "ALL", "AMD", "ANG", "AOA", "ARS", "AWG", "AZN",
-    "BAM", "BBD", "BDT", "BGN", "BHD", "BMD", "BND", "BOB", "BRL",
-    "BSD", "BTN", "BWP", "BYN", "BZD", "CDF", "CHF", "CLP", "CNY",
-    "COP", "CRC", "CUP", "CVE", "CZK", "DJF", "DKK", "DOP", "DZD",
-    "EGP", "ERN", "ETB", "FJD", "FKP", "GEL", "GHS", "GIP", "GMD",
-    "GNF", "GTQ", "GYD", "HKD", "HNL", "HRK", "HTG", "HUF", "IDR",
-    "ILS", "INR", "IQD", "IRR", "ISK", "JMD", "JOD", "JPY", "KES",
-    "KGS", "KHR", "KMF", "KPW", "KRW", "KWD", "KYD", "KZT", "LAK",
-    "LBP", "LKR", "LRD", "LSL", "LYD", "MAD", "MDL", "MGA", "MKD",
-    "MMK", "MNT", "MOP", "MRU", "MUR", "MVR", "MWK", "MXN", "MYR",
-    "MZN", "NAD", "NGN", "NIO", "NOK", "NPR", "NZD", "OMR", "PAB",
-    "PEN", "PGK", "PHP", "PKR", "PLN", "PYG", "QAR", "RON", "RSD",
-    "RUB", "RWF", "SAR", "SBD", "SCR", "SDG", "SEK", "SGD", "SHP",
-    "SLE", "SOS", "SRD", "STN", "SYP", "SZL", "THB", "TJS", "TMT",
-    "TND", "TOP", "TRY", "TTD", "TWD", "TZS", "UAH", "UGX", "UYU",
-    "UZS", "VES", "VND", "VUV", "WST", "XAF", "XCD", "XOF", "XPF",
-    "YER", "ZAR", "ZMW", "ZWL",
+_ALL_CURRENCIES = [
+    *COMMON_CURRENCIES,
+    *(
+        "AED",
+        "AFN",
+        "ALL",
+        "AMD",
+        "ANG",
+        "AOA",
+        "ARS",
+        "AWG",
+        "AZN",
+        "BAM",
+        "BBD",
+        "BDT",
+        "BGN",
+        "BHD",
+        "BMD",
+        "BND",
+        "BOB",
+        "BRL",
+        "BSD",
+        "BTN",
+        "BWP",
+        "BYN",
+        "BZD",
+        "CDF",
+        "CHF",
+        "CLP",
+        "CNY",
+        "COP",
+        "CRC",
+        "CUP",
+        "CVE",
+        "CZK",
+        "DJF",
+        "DKK",
+        "DOP",
+        "DZD",
+        "EGP",
+        "ERN",
+        "ETB",
+        "FJD",
+        "FKP",
+        "GEL",
+        "GHS",
+        "GIP",
+        "GMD",
+        "GNF",
+        "GTQ",
+        "GYD",
+        "HKD",
+        "HNL",
+        "HRK",
+        "HTG",
+        "HUF",
+        "IDR",
+        "ILS",
+        "INR",
+        "IQD",
+        "IRR",
+        "ISK",
+        "JMD",
+        "JOD",
+        "JPY",
+        "KES",
+        "KGS",
+        "KHR",
+        "KMF",
+        "KPW",
+        "KRW",
+        "KWD",
+        "KYD",
+        "KZT",
+        "LAK",
+        "LBP",
+        "LKR",
+        "LRD",
+        "LSL",
+        "LYD",
+        "MAD",
+        "MDL",
+        "MGA",
+        "MKD",
+        "MMK",
+        "MNT",
+        "MOP",
+        "MRU",
+        "MUR",
+        "MVR",
+        "MWK",
+        "MXN",
+        "MYR",
+        "MZN",
+        "NAD",
+        "NGN",
+        "NIO",
+        "NOK",
+        "NPR",
+        "NZD",
+        "OMR",
+        "PAB",
+        "PEN",
+        "PGK",
+        "PHP",
+        "PKR",
+        "PLN",
+        "PYG",
+        "QAR",
+        "RON",
+        "RSD",
+        "RUB",
+        "RWF",
+        "SAR",
+        "SBD",
+        "SCR",
+        "SDG",
+        "SEK",
+        "SGD",
+        "SHP",
+        "SLE",
+        "SOS",
+        "SRD",
+        "STN",
+        "SYP",
+        "SZL",
+        "THB",
+        "TJS",
+        "TMT",
+        "TND",
+        "TOP",
+        "TRY",
+        "TTD",
+        "TWD",
+        "TZS",
+        "UAH",
+        "UGX",
+        "UYU",
+        "UZS",
+        "VES",
+        "VND",
+        "VUV",
+        "WST",
+        "XAF",
+        "XCD",
+        "XOF",
+        "XPF",
+        "YER",
+        "ZAR",
+        "ZMW",
+        "ZWL",
+    ),
 ]
 # Deduplicate while preserving order
 _seen: set[str] = set()
@@ -82,9 +217,7 @@ class SplitsmartConfigFlow(ConfigFlow, domain=DOMAIN):
     def __init__(self) -> None:
         self._data: dict[str, Any] = {}
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_user(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Welcome step — just a Continue button."""
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
@@ -92,9 +225,7 @@ class SplitsmartConfigFlow(ConfigFlow, domain=DOMAIN):
             return await self.async_step_participants()
         return self.async_show_form(step_id="user", data_schema=vol.Schema({}))
 
-    async def async_step_participants(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_participants(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Pick HA users who share the ledger."""
         errors: dict[str, str] = {}
         user_options = await _get_ha_user_options(self.hass)
@@ -123,9 +254,7 @@ class SplitsmartConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_currency(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_currency(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Pick the home currency."""
         if user_input is not None:
             self._data[CONF_HOME_CURRENCY] = user_input[CONF_HOME_CURRENCY]
@@ -145,9 +274,7 @@ class SplitsmartConfigFlow(ConfigFlow, domain=DOMAIN):
             ),
         )
 
-    async def async_step_categories(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Edit the category list."""
         errors: dict[str, str] = {}
         default_text = ", ".join(DEFAULT_CATEGORIES)
@@ -176,9 +303,7 @@ class SplitsmartConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_reconfigure(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Re-enter at the participants step; requires integration reload."""
         errors: dict[str, str] = {}
         user_options = await _get_ha_user_options(self.hass)
@@ -222,18 +347,14 @@ class SplitsmartOptionsFlow(OptionsFlow):
     def __init__(self, entry: ConfigEntry) -> None:
         self._entry = entry
 
-    async def async_step_init(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Show the options menu."""
         return self.async_show_menu(
             step_id="init",
             menu_options=["currency", "categories"],
         )
 
-    async def async_step_currency(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_currency(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Change home currency."""
         current = self._entry.options.get(
             CONF_HOME_CURRENCY, self._entry.data.get(CONF_HOME_CURRENCY, "GBP")
@@ -258,9 +379,7 @@ class SplitsmartOptionsFlow(OptionsFlow):
             ),
         )
 
-    async def async_step_categories(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
+    async def async_step_categories(self, user_input: dict[str, Any] | None = None) -> FlowResult:
         """Edit category list."""
         current_cats = self._entry.options.get(
             CONF_CATEGORIES, self._entry.data.get(CONF_CATEGORIES, DEFAULT_CATEGORIES)
@@ -281,7 +400,9 @@ class SplitsmartOptionsFlow(OptionsFlow):
             step_id="categories",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_CATEGORIES, default=", ".join(current_cats)): selector.TextSelector(
+                    vol.Required(
+                        CONF_CATEGORIES, default=", ".join(current_cats)
+                    ): selector.TextSelector(
                         selector.TextSelectorConfig(
                             multiline=True,
                             type=selector.TextSelectorType.TEXT,

@@ -1,20 +1,19 @@
 """Unit tests for storage.py — no HA event loop required."""
+
 from __future__ import annotations
 
 import asyncio
 import json
 import pathlib
-import sys
 
 import pytest
 
 # conftest.py loads storage into sys.modules before any test file is imported
-from custom_components.splitsmart.storage import (  # noqa: E402
+from custom_components.splitsmart.storage import (
     SplitsmartStorage,
     new_id,
     validate_root,
 )
-
 
 # ------------------------------------------------------------------ new_id
 
@@ -121,7 +120,7 @@ async def test_append_non_ascii(tmp_path: pathlib.Path):
     storage = SplitsmartStorage(root)
     await storage.ensure_layout()
 
-    record = {"id": new_id("ex"), "description": "Café – côté gauche"}
+    record = {"id": new_id("ex"), "description": "Café – côté gauche"}  # noqa: RUF001
     await storage.append(storage.expenses_path, record)
     result = await storage.read_all(storage.expenses_path)
     assert result[0]["description"] == record["description"]
@@ -296,7 +295,9 @@ async def test_file_is_valid_jsonl(tmp_path: pathlib.Path):
     await storage.ensure_layout()
 
     for i in range(5):
-        await storage.append(storage.expenses_path, {"id": new_id("ex"), "v": i, "nested": {"a": i}})
+        await storage.append(
+            storage.expenses_path, {"id": new_id("ex"), "v": i, "nested": {"a": i}}
+        )
 
     raw_lines = storage.expenses_path.read_text(encoding="utf-8").splitlines()
     for line in raw_lines:

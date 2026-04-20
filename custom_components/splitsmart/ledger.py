@@ -4,16 +4,16 @@ No IO, no HA imports, no INFO-level logging. All money maths uses Decimal
 internally; inputs and outputs cross the boundary as float (2dp) to match
 on-disk storage.
 """
+
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, TypedDict
 
 from .const import (
     ID_PREFIX_EXPENSE,
     ID_PREFIX_SETTLEMENT,
-    SOURCES,
     SPLIT_METHOD_EQUAL,
     SPLIT_METHOD_EXACT,
     SPLIT_METHOD_PERCENTAGE,
@@ -90,7 +90,9 @@ def _allocation_share(allocation: dict[str, Any], user_id: str) -> Decimal:
             (Decimal(str(s["value"])) for s in shares if s["user_id"] == user_id),
             Decimal("0"),
         )
-        return (home_amount * user_weight / total_weight).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
+        return (home_amount * user_weight / total_weight).quantize(
+            _TWO_PLACES, rounding=ROUND_HALF_UP
+        )
 
     if method == SPLIT_METHOD_EXACT:
         return Decimal(
@@ -124,9 +126,7 @@ def compute_balances(
         home_amount = Decimal(str(expense["home_amount"]))
         # Collect all participants in this expense
         participants: set[str] = {
-            s["user_id"]
-            for alloc in expense["categories"]
-            for s in alloc["split"]["shares"]
+            s["user_id"] for alloc in expense["categories"] for s in alloc["split"]["shares"]
         }
         participants.add(paid_by)
 
@@ -165,9 +165,7 @@ def compute_pairwise_balances(
     for expense in expenses:
         paid_by = expense["paid_by"]
         participants: set[str] = {
-            s["user_id"]
-            for alloc in expense["categories"]
-            for s in alloc["split"]["shares"]
+            s["user_id"] for alloc in expense["categories"] for s in alloc["split"]["shares"]
         }
         for uid in participants:
             if uid == paid_by:
@@ -246,9 +244,7 @@ def validate_split(
     for entry in shares:
         uid = entry.get("user_id")
         if uid not in participants:
-            raise SplitsmartValidationError(
-                f"User {uid!r} in split is not a known participant."
-            )
+            raise SplitsmartValidationError(f"User {uid!r} in split is not a known participant.")
         val = Decimal(str(entry.get("value", 0)))
         if val < 0:
             raise SplitsmartValidationError(
@@ -304,9 +300,7 @@ def validate_expense_record(
     """Enforce SPEC §9.6 invariants. Raises SplitsmartValidationError on failure."""
     paid_by = record.get("paid_by")
     if paid_by not in participants:
-        raise SplitsmartValidationError(
-            f"paid_by {paid_by!r} is not a known participant."
-        )
+        raise SplitsmartValidationError(f"paid_by {paid_by!r} is not a known participant.")
 
     categories = record.get("categories")
     if not categories:
@@ -321,9 +315,9 @@ def validate_expense_record(
             pass
 
     # Sum of allocation home_amounts must equal expense home_amount to 2dp
-    alloc_sum = sum(
-        Decimal(str(a["home_amount"])) for a in categories
-    ).quantize(_CENT, rounding=ROUND_HALF_UP)
+    alloc_sum = sum(Decimal(str(a["home_amount"])) for a in categories).quantize(
+        _CENT, rounding=ROUND_HALF_UP
+    )
     expense_home = Decimal(str(record.get("home_amount", 0))).quantize(
         _CENT, rounding=ROUND_HALF_UP
     )
@@ -374,7 +368,7 @@ def build_expense_record(
     """Build a fully-populated expense dict ready for disk.
     M1: currency must equal home_currency; fx_rate=1.0, home_amount=amount."""
     record_id = new_id(ID_PREFIX_EXPENSE)
-    now = datetime.now(tz=timezone.utc).astimezone().isoformat()
+    now = datetime.now(tz=UTC).astimezone().isoformat()
     return {
         "id": record_id,
         "created_at": now,
@@ -410,7 +404,7 @@ def build_settlement_record(
 ) -> dict[str, Any]:
     """Build a fully-populated settlement dict ready for disk."""
     record_id = new_id(ID_PREFIX_SETTLEMENT)
-    now = datetime.now(tz=timezone.utc).astimezone().isoformat()
+    now = datetime.now(tz=UTC).astimezone().isoformat()
     return {
         "id": record_id,
         "created_at": now,

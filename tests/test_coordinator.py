@@ -3,19 +3,19 @@
 Calls _async_update_data / async_note_write / async_invalidate directly
 with a minimal mock hass so the test suite runs without a full HA event loop.
 """
+
 from __future__ import annotations
 
 import pathlib
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from custom_components.splitsmart.coordinator import SplitsmartCoordinator, SplitsmartData
+from custom_components.splitsmart.coordinator import SplitsmartCoordinator
 from custom_components.splitsmart.ledger import build_expense_record
-from custom_components.splitsmart.storage import SplitsmartStorage, new_id
-
+from custom_components.splitsmart.storage import SplitsmartStorage
 
 # ------------------------------------------------------------------ minimal hass mock
 
@@ -62,15 +62,40 @@ def _tesco_expense(paid_by: str = "u1") -> dict[str, Any]:
         currency="GBP",
         home_currency="GBP",
         categories=[
-            {"name": "Groceries", "home_amount": 55.20, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}},
-            {"name": "Household", "home_amount": 18.70, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}},
-            {"name": "Alcohol", "home_amount": 8.50, "split": {"method": "exact", "shares": [{"user_id": "u1", "value": 8.50}, {"user_id": "u2", "value": 0.00}]}},
+            {
+                "name": "Groceries",
+                "home_amount": 55.20,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            },
+            {
+                "name": "Household",
+                "home_amount": 18.70,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            },
+            {
+                "name": "Alcohol",
+                "home_amount": 8.50,
+                "split": {
+                    "method": "exact",
+                    "shares": [{"user_id": "u1", "value": 8.50}, {"user_id": "u2", "value": 0.00}],
+                },
+            },
         ],
-        notes=None, source="manual", staging_id=None, receipt_path=None, created_by="u1",
+        notes=None,
+        source="manual",
+        staging_id=None,
+        receipt_path=None,
+        created_by="u1",
     )
 
 
-# ------------------------------------------------------------------ full replay (_async_update_data)
+# ------------------------------------------------------------------ full replay
 
 
 async def test_full_replay_empty(coordinator: SplitsmartCoordinator):
@@ -80,7 +105,9 @@ async def test_full_replay_empty(coordinator: SplitsmartCoordinator):
     assert data.balances == {}
 
 
-async def test_full_replay_three_rows(coordinator: SplitsmartCoordinator, storage: SplitsmartStorage):
+async def test_full_replay_three_rows(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
     for _ in range(3):
         await storage.append(storage.expenses_path, _tesco_expense())
 
@@ -89,19 +116,26 @@ async def test_full_replay_three_rows(coordinator: SplitsmartCoordinator, storag
     assert data.last_expense_id is not None
 
 
-async def test_full_replay_applies_tombstones(coordinator: SplitsmartCoordinator, storage: SplitsmartStorage):
+async def test_full_replay_applies_tombstones(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
     expense = _tesco_expense()
     await storage.append(storage.expenses_path, expense)
     await storage.append_tombstone(
-        created_by="u1", target_type="expense",
-        target_id=expense["id"], operation="delete", previous_snapshot=expense,
+        created_by="u1",
+        target_type="expense",
+        target_id=expense["id"],
+        operation="delete",
+        previous_snapshot=expense,
     )
 
     data = await coordinator._async_update_data()
     assert data.expenses == []
 
 
-async def test_full_replay_computes_balances(coordinator: SplitsmartCoordinator, storage: SplitsmartStorage):
+async def test_full_replay_computes_balances(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
     await storage.append(storage.expenses_path, _tesco_expense(paid_by="u1"))
 
     data = await coordinator._async_update_data()
@@ -109,7 +143,7 @@ async def test_full_replay_computes_balances(coordinator: SplitsmartCoordinator,
     assert data.balances["u2"] == Decimal("-36.95")
 
 
-# ------------------------------------------------------------------ incremental refresh (async_note_write)
+# ------------------------------------------------------------------ incremental refresh
 
 
 async def test_note_write_on_empty_data_triggers_full_replay(
@@ -167,8 +201,11 @@ async def test_note_write_after_edit_materialises_correctly(
     new = _tesco_expense()
     await storage.append(storage.expenses_path, new)
     await storage.append_tombstone(
-        created_by="u1", target_type="expense",
-        target_id=old["id"], operation="edit", previous_snapshot=old,
+        created_by="u1",
+        target_type="expense",
+        target_id=old["id"],
+        operation="edit",
+        previous_snapshot=old,
     )
     await coordinator.async_note_write()
 
@@ -179,7 +216,9 @@ async def test_note_write_after_edit_materialises_correctly(
 # ------------------------------------------------------------------ async_invalidate
 
 
-async def test_invalidate_resets_cursors(coordinator: SplitsmartCoordinator, storage: SplitsmartStorage):
+async def test_invalidate_resets_cursors(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
     expense = _tesco_expense()
     await storage.append(storage.expenses_path, expense)
     coordinator.data = await coordinator._async_update_data()

@@ -1,4 +1,5 @@
 """DataUpdateCoordinator for the Splitsmart shared ledger."""
+
 from __future__ import annotations
 
 import logging

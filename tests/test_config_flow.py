@@ -3,9 +3,8 @@
 Run with: pytest -m ha_integration
 These are skipped in the default test run (Windows / no phcc).
 """
-from __future__ import annotations
 
-from unittest.mock import patch
+from __future__ import annotations
 
 import pytest
 from homeassistant import config_entries
@@ -26,7 +25,9 @@ pytestmark = [pytest.mark.ha_integration, pytest.mark.usefixtures("hass")]
 
 
 async def _start_flow(hass: HomeAssistant) -> str:
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
     return result["flow_id"]
@@ -83,9 +84,7 @@ async def test_participants_requires_at_least_two(hass: HomeAssistant, hass_admi
     await _step(hass, flow_id, "user", {})
 
     # Only one participant — should error
-    result = await _step(
-        hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id]}
-    )
+    result = await _step(hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id]})
     assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "participants"
     assert "min_two_participants" in result.get("errors", {}).get(CONF_PARTICIPANTS, "")
@@ -94,10 +93,14 @@ async def test_participants_requires_at_least_two(hass: HomeAssistant, hass_admi
 # ------------------------------------------------------------------ categories validation
 
 
-async def test_categories_requires_at_least_one(hass: HomeAssistant, hass_admin_user, hass_owner_user):
+async def test_categories_requires_at_least_one(
+    hass: HomeAssistant, hass_admin_user, hass_owner_user
+):
     flow_id = await _start_flow(hass)
     await _step(hass, flow_id, "user", {})
-    await _step(hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]})
+    await _step(
+        hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]}
+    )
     await _step(hass, flow_id, "currency", {CONF_HOME_CURRENCY: "GBP"})
 
     result = await _step(hass, flow_id, "categories", {CONF_CATEGORIES: "  ,  , "})
@@ -105,13 +108,19 @@ async def test_categories_requires_at_least_one(hass: HomeAssistant, hass_admin_
     assert "min_one_category" in result.get("errors", {}).get(CONF_CATEGORIES, "")
 
 
-async def test_categories_normalised_to_title_case(hass: HomeAssistant, hass_admin_user, hass_owner_user):
+async def test_categories_normalised_to_title_case(
+    hass: HomeAssistant, hass_admin_user, hass_owner_user
+):
     flow_id = await _start_flow(hass)
     await _step(hass, flow_id, "user", {})
-    await _step(hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]})
+    await _step(
+        hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]}
+    )
     await _step(hass, flow_id, "currency", {CONF_HOME_CURRENCY: "GBP"})
 
-    result = await _step(hass, flow_id, "categories", {CONF_CATEGORIES: "groceries, UTILITIES, eating out"})
+    result = await _step(
+        hass, flow_id, "categories", {CONF_CATEGORIES: "groceries, UTILITIES, eating out"}
+    )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     cats = result["data"][CONF_CATEGORIES]
     assert "Groceries" in cats
@@ -122,10 +131,14 @@ async def test_categories_normalised_to_title_case(hass: HomeAssistant, hass_adm
 async def test_categories_deduplicates(hass: HomeAssistant, hass_admin_user, hass_owner_user):
     flow_id = await _start_flow(hass)
     await _step(hass, flow_id, "user", {})
-    await _step(hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]})
+    await _step(
+        hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]}
+    )
     await _step(hass, flow_id, "currency", {CONF_HOME_CURRENCY: "GBP"})
 
-    result = await _step(hass, flow_id, "categories", {CONF_CATEGORIES: "Groceries, groceries, GROCERIES"})
+    result = await _step(
+        hass, flow_id, "categories", {CONF_CATEGORIES: "Groceries, groceries, GROCERIES"}
+    )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_CATEGORIES].count("Groceries") == 1
 
@@ -137,12 +150,16 @@ async def test_single_instance_only(hass: HomeAssistant, hass_admin_user, hass_o
     # Create an entry first
     flow_id = await _start_flow(hass)
     await _step(hass, flow_id, "user", {})
-    await _step(hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]})
+    await _step(
+        hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]}
+    )
     await _step(hass, flow_id, "currency", {CONF_HOME_CURRENCY: "GBP"})
     await _step(hass, flow_id, "categories", {CONF_CATEGORIES: "Groceries"})
 
     # Second flow attempt should abort
-    result = await hass.config_entries.flow.async_init(DOMAIN, context={"source": config_entries.SOURCE_USER})
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN, context={"source": config_entries.SOURCE_USER}
+    )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
 
@@ -154,7 +171,9 @@ async def test_options_flow_currency(hass: HomeAssistant, hass_admin_user, hass_
     # Set up an entry
     flow_id = await _start_flow(hass)
     await _step(hass, flow_id, "user", {})
-    await _step(hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]})
+    await _step(
+        hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]}
+    )
     await _step(hass, flow_id, "currency", {CONF_HOME_CURRENCY: "GBP"})
     entry_result = await _step(hass, flow_id, "categories", {CONF_CATEGORIES: "Groceries"})
 
@@ -164,10 +183,14 @@ async def test_options_flow_currency(hass: HomeAssistant, hass_admin_user, hass_
     result = await hass.config_entries.options.async_init(entry_id)
     assert result["step_id"] == "init"
 
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "currency"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "currency"}
+    )
     assert result["step_id"] == "currency"
 
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_HOME_CURRENCY: "EUR"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_HOME_CURRENCY: "EUR"}
+    )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["data"][CONF_HOME_CURRENCY] == "EUR"
 
@@ -175,14 +198,20 @@ async def test_options_flow_currency(hass: HomeAssistant, hass_admin_user, hass_
 async def test_options_flow_categories(hass: HomeAssistant, hass_admin_user, hass_owner_user):
     flow_id = await _start_flow(hass)
     await _step(hass, flow_id, "user", {})
-    await _step(hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]})
+    await _step(
+        hass, flow_id, "participants", {CONF_PARTICIPANTS: [hass_admin_user.id, hass_owner_user.id]}
+    )
     await _step(hass, flow_id, "currency", {CONF_HOME_CURRENCY: "GBP"})
     entry_result = await _step(hass, flow_id, "categories", {CONF_CATEGORIES: "Groceries"})
 
     entry_id = entry_result["result"].entry_id
 
     result = await hass.config_entries.options.async_init(entry_id)
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {"next_step_id": "categories"})
-    result = await hass.config_entries.options.async_configure(result["flow_id"], {CONF_CATEGORIES: "Groceries, Utilities"})
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {"next_step_id": "categories"}
+    )
+    result = await hass.config_entries.options.async_configure(
+        result["flow_id"], {CONF_CATEGORIES: "Groceries, Utilities"}
+    )
     assert result["type"] == FlowResultType.CREATE_ENTRY
     assert "Utilities" in result["data"][CONF_CATEGORIES]

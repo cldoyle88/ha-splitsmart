@@ -1,8 +1,9 @@
 """Splitsmart sensor entities."""
+
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -18,7 +19,6 @@ from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import (
-    CONF_HOME_CURRENCY,
     CONF_PARTICIPANTS,
     DOMAIN,
     SENSOR_BALANCE,
@@ -26,7 +26,7 @@ from .const import (
     SENSOR_SPENDING_MONTH,
     SENSOR_SPENDING_TOTAL_MONTH,
 )
-from .coordinator import SplitsmartCoordinator, SplitsmartData
+from .coordinator import SplitsmartCoordinator
 from .ledger import compute_monthly_spending
 
 _LOGGER = logging.getLogger(__name__)
@@ -161,7 +161,7 @@ class SpendingMonthSensor(_SplitsmartSensor):
     def native_value(self) -> float | None:
         if self.coordinator.data is None:
             return None
-        now = datetime.now(tz=timezone.utc).astimezone()
+        now = datetime.now(tz=UTC).astimezone()
         result = compute_monthly_spending(
             self.coordinator.data.expenses, self._user_id, now.year, now.month
         )
@@ -171,12 +171,14 @@ class SpendingMonthSensor(_SplitsmartSensor):
     def extra_state_attributes(self) -> dict[str, Any]:
         if self.coordinator.data is None:
             return {}
-        now = datetime.now(tz=timezone.utc).astimezone()
+        now = datetime.now(tz=UTC).astimezone()
         result = compute_monthly_spending(
             self.coordinator.data.expenses, self._user_id, now.year, now.month
         )
         return {
-            "by_category": {k: float(v.quantize(Decimal("0.01"))) for k, v in result["by_category"].items()},
+            "by_category": {
+                k: float(v.quantize(Decimal("0.01"))) for k, v in result["by_category"].items()
+            },
             "month": now.strftime("%Y-%m"),
             "home_currency": self.coordinator.home_currency,
         }
@@ -206,22 +208,20 @@ class SpendingTotalMonthSensor(_SplitsmartSensor):
     def native_value(self) -> float | None:
         if self.coordinator.data is None:
             return None
-        now = datetime.now(tz=timezone.utc).astimezone()
-        result = compute_monthly_spending(
-            self.coordinator.data.expenses, None, now.year, now.month
-        )
+        now = datetime.now(tz=UTC).astimezone()
+        result = compute_monthly_spending(self.coordinator.data.expenses, None, now.year, now.month)
         return float(result["total"].quantize(Decimal("0.01")))
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         if self.coordinator.data is None:
             return {}
-        now = datetime.now(tz=timezone.utc).astimezone()
-        result = compute_monthly_spending(
-            self.coordinator.data.expenses, None, now.year, now.month
-        )
+        now = datetime.now(tz=UTC).astimezone()
+        result = compute_monthly_spending(self.coordinator.data.expenses, None, now.year, now.month)
         return {
-            "by_category": {k: float(v.quantize(Decimal("0.01"))) for k, v in result["by_category"].items()},
+            "by_category": {
+                k: float(v.quantize(Decimal("0.01"))) for k, v in result["by_category"].items()
+            },
             "month": now.strftime("%Y-%m"),
             "home_currency": self.coordinator.home_currency,
         }

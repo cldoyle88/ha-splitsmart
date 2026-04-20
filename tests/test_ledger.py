@@ -1,4 +1,5 @@
 """Unit tests for ledger.py — no HA event loop required."""
+
 from __future__ import annotations
 
 from decimal import Decimal
@@ -6,10 +7,8 @@ from decimal import Decimal
 import pytest
 
 # conftest.py loads ledger into sys.modules before any test file is imported
-from custom_components.splitsmart.ledger import (  # noqa: E402
+from custom_components.splitsmart.ledger import (
     SplitsmartValidationError,
-    build_expense_record,
-    build_settlement_record,
     compute_balances,
     compute_monthly_spending,
     compute_pairwise_balances,
@@ -149,7 +148,9 @@ def test_materialise_settlements():
 def test_share_equal_two_users():
     expense = _expense(
         home_amount=100.0,
-        categories=[{"name": "Groceries", "home_amount": 100.0, "split": _equal_split(["u1", "u2"])}],
+        categories=[
+            {"name": "Groceries", "home_amount": 100.0, "split": _equal_split(["u1", "u2"])}
+        ],
     )
     assert compute_user_share(expense, "u1") == Decimal("50.00")
     assert compute_user_share(expense, "u2") == Decimal("50.00")
@@ -158,7 +159,9 @@ def test_share_equal_two_users():
 def test_share_equal_absent_user_returns_zero():
     expense = _expense(
         home_amount=100.0,
-        categories=[{"name": "Groceries", "home_amount": 100.0, "split": _equal_split(["u1", "u2"])}],
+        categories=[
+            {"name": "Groceries", "home_amount": 100.0, "split": _equal_split(["u1", "u2"])}
+        ],
     )
     assert compute_user_share(expense, "u3") == Decimal("0")
 
@@ -185,10 +188,13 @@ def test_share_shares_method():
             {
                 "name": "Groceries",
                 "home_amount": 90.0,
-                "split": {"method": "shares", "shares": [
-                    {"user_id": "u1", "value": 2},
-                    {"user_id": "u2", "value": 1},
-                ]},
+                "split": {
+                    "method": "shares",
+                    "shares": [
+                        {"user_id": "u1", "value": 2},
+                        {"user_id": "u2", "value": 1},
+                    ],
+                },
             }
         ],
     )
@@ -203,10 +209,13 @@ def test_share_percentage_method():
             {
                 "name": "Groceries",
                 "home_amount": 100.0,
-                "split": {"method": "percentage", "shares": [
-                    {"user_id": "u1", "value": 60},
-                    {"user_id": "u2", "value": 40},
-                ]},
+                "split": {
+                    "method": "percentage",
+                    "shares": [
+                        {"user_id": "u1", "value": 60},
+                        {"user_id": "u2", "value": 40},
+                    ],
+                },
             }
         ],
     )
@@ -286,7 +295,11 @@ def test_balances_tesco_example():
         "categories": [
             {"name": "Groceries", "home_amount": 55.20, "split": _equal_split(["u1", "u2"])},
             {"name": "Household", "home_amount": 18.70, "split": _equal_split(["u1", "u2"])},
-            {"name": "Alcohol", "home_amount": 8.50, "split": _exact_split([("u1", 8.50), ("u2", 0.00)])},
+            {
+                "name": "Alcohol",
+                "home_amount": 8.50,
+                "split": _exact_split([("u1", 8.50), ("u2", 0.00)]),
+            },
         ],
     }
     balances = compute_balances([expense], [])
@@ -371,7 +384,11 @@ def test_monthly_spending_tesco_attributes():
         "categories": [
             {"name": "Groceries", "home_amount": 55.20, "split": _equal_split(["u1", "u2"])},
             {"name": "Household", "home_amount": 18.70, "split": _equal_split(["u1", "u2"])},
-            {"name": "Alcohol", "home_amount": 8.50, "split": _exact_split([("u1", 8.50), ("u2", 0.00)])},
+            {
+                "name": "Alcohol",
+                "home_amount": 8.50,
+                "split": _exact_split([("u1", 8.50), ("u2", 0.00)]),
+            },
         ],
     }
     result = compute_monthly_spending([expense], "u1", 2026, 4)
@@ -489,7 +506,10 @@ def test_validate_expense_record_sum_drift():
     )
     with pytest.raises(SplitsmartValidationError, match="90"):
         validate_expense_record(
-            record, participants=USERS, home_currency="GBP", known_categories={"Groceries", "Household"}
+            record,
+            participants=USERS,
+            home_currency="GBP",
+            known_categories={"Groceries", "Household"},
         )
 
 

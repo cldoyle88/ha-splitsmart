@@ -7,6 +7,7 @@ Python without executing the HA-dependent __init__.py.
 All test files then use normal `from custom_components.splitsmart.X import Y`
 imports.  The HA-dependent __init__.py is never executed.
 """
+
 from __future__ import annotations
 
 import pathlib
@@ -23,7 +24,7 @@ def _make_stub_package(dotted: str, path: pathlib.Path) -> types.ModuleType:
     if dotted in sys.modules:
         return sys.modules[dotted]
     mod = types.ModuleType(dotted)
-    mod.__path__ = [str(path)]          # marks it as a package to Python
+    mod.__path__ = [str(path)]  # marks it as a package to Python
     mod.__package__ = dotted
     mod.__spec__ = None
     sys.modules[dotted] = mod

@@ -1,4 +1,5 @@
 """Constants for Splitsmart."""
+
 from __future__ import annotations
 
 DOMAIN = "splitsmart"
@@ -45,7 +46,12 @@ SPLIT_METHOD_EQUAL = "equal"
 SPLIT_METHOD_PERCENTAGE = "percentage"
 SPLIT_METHOD_SHARES = "shares"
 SPLIT_METHOD_EXACT = "exact"
-SPLIT_METHODS = {SPLIT_METHOD_EQUAL, SPLIT_METHOD_PERCENTAGE, SPLIT_METHOD_SHARES, SPLIT_METHOD_EXACT}
+SPLIT_METHODS = {
+    SPLIT_METHOD_EQUAL,
+    SPLIT_METHOD_PERCENTAGE,
+    SPLIT_METHOD_SHARES,
+    SPLIT_METHOD_EXACT,
+}
 
 # Entry sources
 SOURCE_MANUAL = "manual"

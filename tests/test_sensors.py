@@ -3,17 +3,17 @@
 Instantiates sensor classes directly with mocked coordinator and entry —
 no HA event loop required.
 """
+
 from __future__ import annotations
 
 import pathlib
-from datetime import datetime, timezone
-from decimal import Decimal
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.splitsmart.coordinator import SplitsmartCoordinator, SplitsmartData
+from custom_components.splitsmart.coordinator import SplitsmartCoordinator
 from custom_components.splitsmart.ledger import build_expense_record
 from custom_components.splitsmart.sensor import (
     BalanceSensor,
@@ -22,7 +22,6 @@ from custom_components.splitsmart.sensor import (
     SpendingTotalMonthSensor,
 )
 from custom_components.splitsmart.storage import SplitsmartStorage
-
 
 # ------------------------------------------------------------------ fixtures
 
@@ -40,7 +39,8 @@ async def coordinator(storage: SplitsmartStorage) -> SplitsmartCoordinator:
     hass.bus = MagicMock()
     hass.bus.async_fire = MagicMock()
     coord = SplitsmartCoordinator(
-        hass, storage,
+        hass,
+        storage,
         participants=["u1", "u2"],
         home_currency="GBP",
         categories=["Groceries", "Household", "Alcohol"],
@@ -62,13 +62,41 @@ def _tesco_expense() -> dict[str, Any]:
     return build_expense_record(
         date="2026-04-15",
         description="Tesco Metro",
-        paid_by="u1", amount=82.40, currency="GBP", home_currency="GBP",
+        paid_by="u1",
+        amount=82.40,
+        currency="GBP",
+        home_currency="GBP",
         categories=[
-            {"name": "Groceries", "home_amount": 55.20, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}},
-            {"name": "Household", "home_amount": 18.70, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}},
-            {"name": "Alcohol", "home_amount": 8.50, "split": {"method": "exact", "shares": [{"user_id": "u1", "value": 8.50}, {"user_id": "u2", "value": 0.00}]}},
+            {
+                "name": "Groceries",
+                "home_amount": 55.20,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            },
+            {
+                "name": "Household",
+                "home_amount": 18.70,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            },
+            {
+                "name": "Alcohol",
+                "home_amount": 8.50,
+                "split": {
+                    "method": "exact",
+                    "shares": [{"user_id": "u1", "value": 8.50}, {"user_id": "u2", "value": 0.00}],
+                },
+            },
         ],
-        notes=None, source="manual", staging_id=None, receipt_path=None, created_by="u1",
+        notes=None,
+        source="manual",
+        staging_id=None,
+        receipt_path=None,
+        created_by="u1",
     )
 
 
@@ -123,13 +151,29 @@ async def test_spending_month_sensor_current_month(
     coordinator: SplitsmartCoordinator, storage: SplitsmartStorage, entry: MagicMock
 ):
     # Use an expense dated to the actual current month so the sensor picks it up
-    now = datetime.now(tz=timezone.utc).astimezone()
+    now = datetime.now(tz=UTC).astimezone()
     expense = build_expense_record(
         date=now.strftime("%Y-%m-15"),
         description="Supermarket",
-        paid_by="u1", amount=100.00, currency="GBP", home_currency="GBP",
-        categories=[{"name": "Groceries", "home_amount": 100.00, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}}],
-        notes=None, source="manual", staging_id=None, receipt_path=None, created_by="u1",
+        paid_by="u1",
+        amount=100.00,
+        currency="GBP",
+        home_currency="GBP",
+        categories=[
+            {
+                "name": "Groceries",
+                "home_amount": 100.00,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            }
+        ],
+        notes=None,
+        source="manual",
+        staging_id=None,
+        receipt_path=None,
+        created_by="u1",
     )
     await storage.append(storage.expenses_path, expense)
     await coordinator.async_note_write()
@@ -150,9 +194,25 @@ async def test_spending_month_sensor_excludes_other_months(
     expense = build_expense_record(
         date="2000-01-15",
         description="Ancient expense",
-        paid_by="u1", amount=100.00, currency="GBP", home_currency="GBP",
-        categories=[{"name": "Groceries", "home_amount": 100.00, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}}],
-        notes=None, source="manual", staging_id=None, receipt_path=None, created_by="u1",
+        paid_by="u1",
+        amount=100.00,
+        currency="GBP",
+        home_currency="GBP",
+        categories=[
+            {
+                "name": "Groceries",
+                "home_amount": 100.00,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            }
+        ],
+        notes=None,
+        source="manual",
+        staging_id=None,
+        receipt_path=None,
+        created_by="u1",
     )
     await storage.append(storage.expenses_path, expense)
     await coordinator.async_note_write()
@@ -167,13 +227,29 @@ async def test_spending_month_sensor_excludes_other_months(
 async def test_spending_total_month_sensor_attributes(
     coordinator: SplitsmartCoordinator, storage: SplitsmartStorage, entry: MagicMock
 ):
-    now = datetime.now(tz=timezone.utc).astimezone()
+    now = datetime.now(tz=UTC).astimezone()
     expense = build_expense_record(
         date=now.strftime("%Y-%m-15"),
         description="Shop",
-        paid_by="u1", amount=60.00, currency="GBP", home_currency="GBP",
-        categories=[{"name": "Groceries", "home_amount": 60.00, "split": {"method": "equal", "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}]}}],
-        notes=None, source="manual", staging_id=None, receipt_path=None, created_by="u1",
+        paid_by="u1",
+        amount=60.00,
+        currency="GBP",
+        home_currency="GBP",
+        categories=[
+            {
+                "name": "Groceries",
+                "home_amount": 60.00,
+                "split": {
+                    "method": "equal",
+                    "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+                },
+            }
+        ],
+        notes=None,
+        source="manual",
+        staging_id=None,
+        receipt_path=None,
+        created_by="u1",
     )
     await storage.append(storage.expenses_path, expense)
     await coordinator.async_note_write()
@@ -208,7 +284,7 @@ def test_last_expense_sensor_none_when_empty(coordinator: SplitsmartCoordinator,
     assert sensor.extra_state_attributes == {}
 
 
-# ------------------------------------------------------------------ state_class / device_class / unique_id
+# ------------------------------------------------------------------ state_class / device_class
 
 
 def test_sensor_class_attributes(entry: MagicMock):
@@ -234,5 +310,4 @@ def test_sensor_class_attributes(entry: MagicMock):
     assert "last_expense" in le._attr_unique_id
 
 
-# ------------------------------------------------------------------ config_flow tests require Linux/phcc
-# (marked ha_integration — run with: pytest -m ha_integration)
+# config_flow tests require Linux/phcc (ha_integration — pytest -m ha_integration)

@@ -1,4 +1,5 @@
 """Append-only JSONL storage primitives for Splitsmart."""
+
 from __future__ import annotations
 
 import asyncio
@@ -6,7 +7,7 @@ import json
 import logging
 import pathlib
 from collections.abc import AsyncIterator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 import aiofiles
@@ -107,17 +108,16 @@ class SplitsmartStorage:
         """Serialise record as one JSON line and append-flush to path.
         Per-path lock serialises concurrent writes from the same process."""
         line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
-        async with self._lock(path):
-            async with aiofiles.open(path, mode="a", encoding="utf-8") as fh:
-                await fh.write(line)
-                await fh.flush()
+        async with self._lock(path), aiofiles.open(path, mode="a", encoding="utf-8") as fh:
+            await fh.write(line)
+            await fh.flush()
 
     async def read_all(self, path: pathlib.Path) -> list[dict[str, Any]]:
         """Return every record in the file, in file order. Missing file → []."""
         if not path.exists():
             return []
         records: list[dict[str, Any]] = []
-        async with aiofiles.open(path, mode="r", encoding="utf-8") as fh:
+        async with aiofiles.open(path, encoding="utf-8") as fh:
             async for raw in fh:
                 raw = raw.strip()
                 if raw:
@@ -136,7 +136,7 @@ class SplitsmartStorage:
             return []
         results: list[dict[str, Any]] = []
         found = False
-        async with aiofiles.open(path, mode="r", encoding="utf-8") as fh:
+        async with aiofiles.open(path, encoding="utf-8") as fh:
             async for raw in fh:
                 raw = raw.strip()
                 if not raw:
@@ -152,7 +152,7 @@ class SplitsmartStorage:
         """Stream records without materialising the full list."""
         if not path.exists():
             return
-        async with aiofiles.open(path, mode="r", encoding="utf-8") as fh:
+        async with aiofiles.open(path, encoding="utf-8") as fh:
             async for raw in fh:
                 raw = raw.strip()
                 if raw:
@@ -173,7 +173,7 @@ class SplitsmartStorage:
         """Build, append, and return a tombstone record."""
         record: dict[str, Any] = {
             "id": new_id(ID_PREFIX_TOMBSTONE),
-            "created_at": datetime.now(tz=timezone.utc).astimezone().isoformat(),
+            "created_at": datetime.now(tz=UTC).astimezone().isoformat(),
             "created_by": created_by,
             "target_type": target_type,
             "target_id": target_id,

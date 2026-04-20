@@ -345,7 +345,12 @@ def test_entity_names_and_device_info(entry: MagicMock):
 
     # All sensors share the same device, identified by (DOMAIN, entry_id)
     all_sensors = [
-        chris_balance, slav_balance, chris_spending, slav_spending, total_spending, last_expense
+        chris_balance,
+        slav_balance,
+        chris_spending,
+        slav_spending,
+        total_spending,
+        last_expense,
     ]
     for sensor in all_sensors:
         info = sensor.device_info

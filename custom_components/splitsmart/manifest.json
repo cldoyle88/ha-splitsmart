@@ -1,0 +1,17 @@
+{
+  "domain": "splitsmart",
+  "name": "Splitsmart",
+  "version": "0.1.0",
+  "config_flow": true,
+  "documentation": "https://github.com/cldoyle88/ha-splitsmart",
+  "issue_tracker": "https://github.com/cldoyle88/ha-splitsmart/issues",
+  "codeowners": ["@cldoyle88"],
+  "requirements": [
+    "aiofiles>=23.0",
+    "openpyxl>=3.1",
+    "ofxparse>=0.21",
+    "python-ulid>=2.2"
+  ],
+  "iot_class": "local_push",
+  "dependencies": ["http"]
+}

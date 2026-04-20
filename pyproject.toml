@@ -13,3 +13,28 @@ check_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Exclude HA-framework tests from the default local run (Windows dev flow —
+# phcc imports fcntl which is POSIX-only). CI overrides this with -m "" so
+# all 100 tests execute. See .github/workflows/test.yml.
+addopts = "-m 'not ha_integration'"
+markers = ["ha_integration: requires pytest-homeassistant-custom-component on Linux"]
+
+[project]
+name = "ha-splitsmart"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.3",
+    "aiofiles>=23.0",
+    "python-ulid>=2.2",
+    "freezegun",
+    "homeassistant",  # needed to import HA classes in mock-based tests
+    "ruff",
+]
+# CI-only (Linux); imports fcntl so it crashes on Windows
+ci = [
+    "pytest-homeassistant-custom-component",
+]

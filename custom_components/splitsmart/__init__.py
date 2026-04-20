@@ -50,6 +50,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         participants=participants,
         home_currency=home_currency,
         categories=categories,
+        config_entry=entry,
     )
 
     try:

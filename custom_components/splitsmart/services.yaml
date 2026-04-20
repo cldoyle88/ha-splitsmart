@@ -1,0 +1,221 @@
+add_expense:
+  name: Add expense
+  description: Add a new expense directly to the shared ledger.
+  fields:
+    date:
+      name: Date
+      description: Date of the expense (YYYY-MM-DD).
+      required: true
+      example: "2026-04-15"
+      selector:
+        date:
+    description:
+      name: Description
+      description: Short description of the expense.
+      required: true
+      example: "Tesco Metro"
+      selector:
+        text:
+    paid_by:
+      name: Paid by
+      description: HA user ID of the person who paid.
+      required: true
+      example: "user_abc123"
+      selector:
+        text:
+    amount:
+      name: Amount
+      description: Total amount paid.
+      required: true
+      example: 82.40
+      selector:
+        number:
+          min: 0.01
+          step: 0.01
+    currency:
+      name: Currency
+      description: ISO-4217 currency code. Defaults to home currency.
+      required: false
+      example: "GBP"
+      selector:
+        text:
+    categories:
+      name: Categories
+      description: >
+        List of category allocations. Each entry has name, home_amount, and
+        split (method + shares). See documentation for the full schema.
+      required: true
+      selector:
+        object:
+    notes:
+      name: Notes
+      description: Optional free-text note.
+      required: false
+      selector:
+        text:
+          multiline: true
+
+add_settlement:
+  name: Add settlement
+  description: Record a payment between participants.
+  fields:
+    date:
+      name: Date
+      description: Date the payment was made.
+      required: true
+      selector:
+        date:
+    from_user:
+      name: From user
+      description: HA user ID of the person paying.
+      required: true
+      selector:
+        text:
+    to_user:
+      name: To user
+      description: HA user ID of the person receiving the payment.
+      required: true
+      selector:
+        text:
+    amount:
+      name: Amount
+      description: Amount transferred.
+      required: true
+      selector:
+        number:
+          min: 0.01
+          step: 0.01
+    currency:
+      name: Currency
+      description: ISO-4217 currency code. Defaults to home currency.
+      required: false
+      selector:
+        text:
+    notes:
+      name: Notes
+      required: false
+      selector:
+        text:
+
+edit_expense:
+  name: Edit expense
+  description: >
+    Replace an existing expense with new data. The original is tombstoned;
+    a new expense record is created. Supply the complete replacement — not a patch.
+  fields:
+    id:
+      name: Expense ID
+      description: The ex_ id of the expense to replace.
+      required: true
+      selector:
+        text:
+    reason:
+      name: Reason
+      description: Optional reason for the edit (stored in the tombstone).
+      required: false
+      selector:
+        text:
+    date:
+      name: Date
+      required: true
+      selector:
+        date:
+    description:
+      name: Description
+      required: true
+      selector:
+        text:
+    paid_by:
+      name: Paid by
+      required: true
+      selector:
+        text:
+    amount:
+      name: Amount
+      required: true
+      selector:
+        number:
+          min: 0.01
+          step: 0.01
+    categories:
+      name: Categories
+      required: true
+      selector:
+        object:
+    notes:
+      name: Notes
+      required: false
+      selector:
+        text:
+
+delete_expense:
+  name: Delete expense
+  description: Tombstone an expense. Balance recalculates as if it never existed.
+  fields:
+    id:
+      name: Expense ID
+      required: true
+      selector:
+        text:
+    reason:
+      name: Reason
+      required: false
+      selector:
+        text:
+
+edit_settlement:
+  name: Edit settlement
+  description: Replace an existing settlement with new data.
+  fields:
+    id:
+      name: Settlement ID
+      required: true
+      selector:
+        text:
+    reason:
+      name: Reason
+      required: false
+      selector:
+        text:
+    date:
+      name: Date
+      required: true
+      selector:
+        date:
+    from_user:
+      name: From user
+      required: true
+      selector:
+        text:
+    to_user:
+      name: To user
+      required: true
+      selector:
+        text:
+    amount:
+      name: Amount
+      required: true
+      selector:
+        number:
+          min: 0.01
+          step: 0.01
+    notes:
+      name: Notes
+      required: false
+      selector:
+        text:
+
+delete_settlement:
+  name: Delete settlement
+  description: Tombstone a settlement.
+  fields:
+    id:
+      name: Settlement ID
+      required: true
+      selector:
+        text:
+    reason:
+      name: Reason
+      required: false
+      selector:
+        text:

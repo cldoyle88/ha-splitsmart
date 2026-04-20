@@ -32,6 +32,7 @@ test = [
     "python-ulid>=2.2",
     "freezegun",
     "homeassistant",  # needed to import HA classes in mock-based tests
+    "ruff",
 ]
 # CI-only (Linux); imports fcntl so it crashes on Windows
 ci = [

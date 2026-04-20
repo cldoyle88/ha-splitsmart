@@ -18,7 +18,10 @@ from custom_components.splitsmart.const import (
     DOMAIN,
 )
 
-pytestmark = [pytest.mark.ha_integration, pytest.mark.usefixtures("hass")]
+pytestmark = [
+    pytest.mark.ha_integration,
+    pytest.mark.usefixtures("hass", "enable_custom_integrations"),
+]
 
 
 # ------------------------------------------------------------------ helpers

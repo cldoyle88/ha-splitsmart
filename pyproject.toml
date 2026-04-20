@@ -13,3 +13,26 @@ check_untyped_defs = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Exclude HA-framework tests from the default run; they need Linux + phcc.
+# Run with: pytest -m ha_integration
+addopts = "-m 'not ha_integration'"
+markers = ["ha_integration: requires pytest-homeassistant-custom-component on Linux"]
+
+[project]
+name = "ha-splitsmart"
+version = "0.1.0"
+requires-python = ">=3.12"
+
+[project.optional-dependencies]
+test = [
+    "pytest>=9.0",
+    "pytest-asyncio>=1.3",
+    "aiofiles>=23.0",
+    "python-ulid>=2.2",
+    "freezegun",
+    "homeassistant",  # needed to import HA classes in mock-based tests
+]
+# CI-only (Linux); imports fcntl so it crashes on Windows
+ci = [
+    "pytest-homeassistant-custom-component",
+]

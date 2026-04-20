@@ -1,0 +1,80 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Splitsmart",
+        "description": "Splitsmart stores your shared household expenses under `/config/splitsmart/`. No cloud dependency — everything stays on your Home Assistant instance."
+      },
+      "participants": {
+        "title": "Participants",
+        "description": "Select the Home Assistant users who share the ledger. At least two are required.",
+        "data": {
+          "participants": "Participants"
+        }
+      },
+      "currency": {
+        "title": "Home currency",
+        "description": "All balances and sensors will display in this currency.",
+        "data": {
+          "home_currency": "Home currency"
+        }
+      },
+      "categories": {
+        "title": "Categories",
+        "description": "Enter one category per line (or comma-separated). These are used to split expenses by type.",
+        "data": {
+          "categories": "Categories"
+        }
+      }
+    },
+    "abort": {
+      "single_instance_allowed": "Only one Splitsmart instance is allowed per Home Assistant installation."
+    },
+    "error": {
+      "min_two_participants": "Please select at least two participants.",
+      "min_one_category": "Please enter at least one category."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Splitsmart settings",
+        "menu_options": {
+          "currency": "Change home currency",
+          "categories": "Edit categories"
+        }
+      },
+      "currency": {
+        "title": "Home currency",
+        "data": {
+          "home_currency": "Home currency"
+        }
+      },
+      "categories": {
+        "title": "Categories",
+        "data": {
+          "categories": "Categories"
+        }
+      }
+    },
+    "error": {
+      "min_one_category": "Please enter at least one category."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "balance": {
+        "name": "Balance"
+      },
+      "spending_month": {
+        "name": "Spending this month"
+      },
+      "spending_total_month": {
+        "name": "Total spending this month"
+      },
+      "last_expense": {
+        "name": "Last expense"
+      }
+    }
+  }
+}

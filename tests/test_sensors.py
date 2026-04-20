@@ -13,9 +13,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from custom_components.splitsmart.const import DOMAIN
 from custom_components.splitsmart.coordinator import SplitsmartCoordinator
 from custom_components.splitsmart.ledger import build_expense_record
-from custom_components.splitsmart.const import DOMAIN
 from custom_components.splitsmart.sensor import (
     BalanceSensor,
     LastExpenseSensor,
@@ -344,7 +344,10 @@ def test_entity_names_and_device_info(entry: MagicMock):
     assert "def456" in slav_spending._attr_unique_id
 
     # All sensors share the same device, identified by (DOMAIN, entry_id)
-    for sensor in [chris_balance, slav_balance, chris_spending, slav_spending, total_spending, last_expense]:
+    all_sensors = [
+        chris_balance, slav_balance, chris_spending, slav_spending, total_spending, last_expense
+    ]
+    for sensor in all_sensors:
         info = sensor.device_info
         assert info is not None
         assert (DOMAIN, "test_entry") in info["identifiers"]

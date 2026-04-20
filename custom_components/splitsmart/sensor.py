@@ -55,7 +55,9 @@ async def async_setup_entry(
     for user_id in participants:
         display_name = user_names[user_id]
         entities.append(BalanceSensor(coordinator, entry, user_id, display_name, home_currency))
-        entities.append(SpendingMonthSensor(coordinator, entry, user_id, display_name, home_currency))
+        entities.append(
+            SpendingMonthSensor(coordinator, entry, user_id, display_name, home_currency)
+        )
 
     # Integration-level sensors
     entities.append(SpendingTotalMonthSensor(coordinator, entry, home_currency))

@@ -580,3 +580,25 @@ Using `pytest-homeassistant-custom-component`'s `hass` fixture and its `tmp_path
 4. **Tombstone materialisation** — simplified to "drop any row whose id appears as any tombstone's `target_id`". No chain-following. Safe because edit always writes the new record before the tombstone (amendment 5).
 5. **Windows append atomicity** — mitigated by single-writer rule. Concurrent-append test guards against POSIX regression.
 6. **`native_unit_of_measurement`** — ISO code (e.g. `"GBP"`). Card renders the symbol.
+
+---
+
+## 7. Post-implementation notes
+
+Deviations identified during M1 QA review and their resolution status.
+
+**Accepted deviations (no code change required):**
+
+1. **Config flow `finish` step removed** — Entry created directly at end of `async_step_categories`. The summary step added no functional value; removing it reduces friction.
+2. **Config flow `user` step welcome text** — Text delivered via `translations/en.json` rather than the Python layer. Acceptable provided the translation file supplies the copy.
+3. **Config flow options flow omits "Named splits" menu item** — The plan called it a stub; omitting the stub is equivalent for M1. The config key is still written as `{}` by the initial flow.
+4. **Config flow participant filter — no "owner-only-if-alone" exclusion** — The min-2-participants validation catches the pathological single-user case anyway.
+5. **`SplitsmartData.last_refresh_full` absent** — Field appears in the plan's dataclass sketch but is never consumed by any code path. Likely a remnant from an earlier design iteration.
+6. **`receipt_path` carry-forward in `edit_expense`** — When the caller omits `receipt_path`, the existing value is preserved rather than cleared. This is a deliberate improvement over strict full-replacement semantics; callers should not be required to re-specify a receipt path they did not change. Documented with an inline comment in `services.py`.
+
+**Resolved deviations (fixed in post-M1 fix commit — SHA to be filled after push):**
+
+- **§6 Sensor entity_id pattern** — `device_info` added to `_SplitsmartSensor` with `name="Splitsmart"`, `model="Household finance"`, `identifiers={(DOMAIN, entry.entry_id)}`. HA now prepends the device name, producing `sensor.splitsmart_balance_chris` etc. as specified. Resolved in post-M1 fix commit.
+- **§7 Sensor name uses user_id, not display name** — `async_setup_entry` now resolves display names via `hass.auth.async_get_user(user_id)` and passes them into per-user sensor constructors. Falls back to `user_id` for deleted users. Unique IDs remain keyed on `user_id`. Resolved in post-M1 fix commit.
+- **§8 `build_settlement_record` drops `created_by`** — `created_by` is now written into the settlement dict, consistent with expense records. Covered by a new unit test. Resolved in post-M1 fix commit.
+- **§9 services.yaml edit/delete fields lack descriptions** — All fields in `edit_expense`, `delete_expense`, `edit_settlement`, and `delete_settlement` now carry `description` and `example` entries matching the style of `add_expense`. Resolved in post-M1 fix commit.

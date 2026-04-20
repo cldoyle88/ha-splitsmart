@@ -269,6 +269,9 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
         notes=data.get("notes"),
         source=existing.get("source", "manual"),
         staging_id=existing.get("staging_id"),
+        # receipt_path is the single exception to the "complete replacement, not a patch" rule —
+        # when omitted by the caller, the existing value is preserved. This saves callers from
+        # having to re-send the receipt path for trivial edits.
         receipt_path=data.get("receipt_path", existing.get("receipt_path")),
         created_by=caller,
     )

@@ -9,6 +9,7 @@ import pytest
 # conftest.py loads ledger into sys.modules before any test file is imported
 from custom_components.splitsmart.ledger import (
     SplitsmartValidationError,
+    build_settlement_record,
     compute_balances,
     compute_monthly_spending,
     compute_pairwise_balances,
@@ -550,3 +551,24 @@ def test_validate_settlement_unknown_user():
     record = {"from_user": "u1", "to_user": "unknown", "home_amount": 50.0}
     with pytest.raises(SplitsmartValidationError, match="to_user"):
         validate_settlement_record(record, participants=USERS, home_currency="GBP")
+
+
+# ------------------------------------------------------------------ build_settlement_record
+
+
+def test_build_settlement_record_includes_created_by():
+    record = build_settlement_record(
+        date="2026-04-20",
+        from_user="u1",
+        to_user="u2",
+        amount=20.0,
+        currency="GBP",
+        home_currency="GBP",
+        notes=None,
+        created_by="u1",
+    )
+    assert record["created_by"] == "u1"
+    assert record["from_user"] == "u1"
+    assert record["to_user"] == "u2"
+    assert record["amount"] == 20.0
+    assert record["id"].startswith("sl_")

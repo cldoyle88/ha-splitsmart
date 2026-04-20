@@ -14,6 +14,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
@@ -42,12 +43,19 @@ async def async_setup_entry(
     participants: list[str] = entry.data[CONF_PARTICIPANTS]
     home_currency: str = coordinator.home_currency
 
+    # Resolve display names once at setup; fall back to user_id if user deleted.
+    user_names: dict[str, str] = {}
+    for user_id in participants:
+        user = await hass.auth.async_get_user(user_id)
+        user_names[user_id] = user.name if user is not None else user_id
+
     entities: list[SensorEntity] = []
 
     # Per-participant sensors
     for user_id in participants:
-        entities.append(BalanceSensor(coordinator, entry, user_id, home_currency))
-        entities.append(SpendingMonthSensor(coordinator, entry, user_id, home_currency))
+        display_name = user_names[user_id]
+        entities.append(BalanceSensor(coordinator, entry, user_id, display_name, home_currency))
+        entities.append(SpendingMonthSensor(coordinator, entry, user_id, display_name, home_currency))
 
     # Integration-level sensors
     entities.append(SpendingTotalMonthSensor(coordinator, entry, home_currency))
@@ -84,6 +92,14 @@ class _SplitsmartSensor(CoordinatorEntity[SplitsmartCoordinator], SensorEntity):
         super().__init__(coordinator)
         self._entry = entry
 
+    @property
+    def device_info(self) -> DeviceInfo:
+        return DeviceInfo(
+            identifiers={(DOMAIN, self._entry.entry_id)},
+            name="Splitsmart",
+            model="Household finance",
+        )
+
 
 # ------------------------------------------------------------------ balance
 
@@ -98,17 +114,19 @@ class BalanceSensor(_SplitsmartSensor):
         coordinator: SplitsmartCoordinator,
         entry: ConfigEntry,
         user_id: str,
+        display_name: str,
         home_currency: str,
     ) -> None:
         super().__init__(coordinator, entry)
         self._user_id = user_id
+        self._display_name = display_name
         self._attr_unique_id = f"{entry.entry_id}_{SENSOR_BALANCE}_{user_id}"
         self._attr_native_unit_of_measurement = home_currency
         self._attr_translation_key = SENSOR_BALANCE
 
     @property
     def name(self) -> str:
-        return f"Balance {self._user_id}"
+        return f"Balance {self._display_name}"
 
     @property
     def native_value(self) -> float | None:
@@ -145,17 +163,19 @@ class SpendingMonthSensor(_SplitsmartSensor):
         coordinator: SplitsmartCoordinator,
         entry: ConfigEntry,
         user_id: str,
+        display_name: str,
         home_currency: str,
     ) -> None:
         super().__init__(coordinator, entry)
         self._user_id = user_id
+        self._display_name = display_name
         self._attr_unique_id = f"{entry.entry_id}_{SENSOR_SPENDING_MONTH}_{user_id}"
         self._attr_native_unit_of_measurement = home_currency
         self._attr_translation_key = SENSOR_SPENDING_MONTH
 
     @property
     def name(self) -> str:
-        return f"Spending this month {self._user_id}"
+        return f"Spending this month {self._display_name}"
 
     @property
     def native_value(self) -> float | None:

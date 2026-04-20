@@ -408,6 +408,7 @@ def build_settlement_record(
     return {
         "id": record_id,
         "created_at": now,
+        "created_by": created_by,
         "date": date,
         "from_user": from_user,
         "to_user": to_user,

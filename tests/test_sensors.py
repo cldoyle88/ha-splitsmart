@@ -15,6 +15,7 @@ import pytest
 
 from custom_components.splitsmart.coordinator import SplitsmartCoordinator
 from custom_components.splitsmart.ledger import build_expense_record
+from custom_components.splitsmart.const import DOMAIN
 from custom_components.splitsmart.sensor import (
     BalanceSensor,
     LastExpenseSensor,
@@ -110,7 +111,7 @@ async def test_balance_sensor_positive_for_payer(
     await storage.append(storage.expenses_path, expense)
     await coordinator.async_note_write()
 
-    sensor = BalanceSensor(coordinator, entry, "u1", "GBP")
+    sensor = BalanceSensor(coordinator, entry, "u1", "u1", "GBP")
     assert sensor.native_value == 36.95
 
 
@@ -121,13 +122,13 @@ async def test_balance_sensor_negative_for_debtor(
     await storage.append(storage.expenses_path, expense)
     await coordinator.async_note_write()
 
-    sensor = BalanceSensor(coordinator, entry, "u2", "GBP")
+    sensor = BalanceSensor(coordinator, entry, "u2", "u2", "GBP")
     assert sensor.native_value == -36.95
 
 
 def test_balance_sensor_none_when_no_data(coordinator: SplitsmartCoordinator, entry: MagicMock):
     coordinator.data = None  # type: ignore[assignment]
-    sensor = BalanceSensor(coordinator, entry, "u1", "GBP")
+    sensor = BalanceSensor(coordinator, entry, "u1", "u1", "GBP")
     assert sensor.native_value is None
     assert sensor.extra_state_attributes == {}
 
@@ -138,7 +139,7 @@ async def test_balance_sensor_per_partner_attribute(
     await storage.append(storage.expenses_path, _tesco_expense())
     await coordinator.async_note_write()
 
-    sensor = BalanceSensor(coordinator, entry, "u1", "GBP")
+    sensor = BalanceSensor(coordinator, entry, "u1", "u1", "GBP")
     attrs = sensor.extra_state_attributes
     assert attrs["home_currency"] == "GBP"
     assert "per_partner" in attrs
@@ -178,7 +179,7 @@ async def test_spending_month_sensor_current_month(
     await storage.append(storage.expenses_path, expense)
     await coordinator.async_note_write()
 
-    sensor = SpendingMonthSensor(coordinator, entry, "u1", "GBP")
+    sensor = SpendingMonthSensor(coordinator, entry, "u1", "u1", "GBP")
     assert sensor.native_value == 50.0
     attrs = sensor.extra_state_attributes
     assert "by_category" in attrs
@@ -217,7 +218,7 @@ async def test_spending_month_sensor_excludes_other_months(
     await storage.append(storage.expenses_path, expense)
     await coordinator.async_note_write()
 
-    sensor = SpendingMonthSensor(coordinator, entry, "u1", "GBP")
+    sensor = SpendingMonthSensor(coordinator, entry, "u1", "u1", "GBP")
     assert sensor.native_value == 0.0
 
 
@@ -293,13 +294,13 @@ def test_sensor_class_attributes(entry: MagicMock):
     coord = MagicMock()
     coord.home_currency = "GBP"
 
-    b = BalanceSensor(coord, entry, "u1", "GBP")
+    b = BalanceSensor(coord, entry, "u1", "u1", "GBP")
     assert b._attr_state_class == SensorStateClass.TOTAL
     assert b._attr_device_class == SensorDeviceClass.MONETARY
     assert b._attr_native_unit_of_measurement == "GBP"
     assert "u1" in b._attr_unique_id
 
-    s = SpendingMonthSensor(coord, entry, "u1", "GBP")
+    s = SpendingMonthSensor(coord, entry, "u1", "u1", "GBP")
     assert s._attr_native_unit_of_measurement == "GBP"
     assert "u1" in s._attr_unique_id
 
@@ -308,6 +309,47 @@ def test_sensor_class_attributes(entry: MagicMock):
 
     le = LastExpenseSensor(coord, entry)
     assert "last_expense" in le._attr_unique_id
+
+
+# ------------------------------------------------------------------ entity names and device
+
+
+def test_entity_names_and_device_info(entry: MagicMock):
+    """Assert names produce the expected entity_id slugs and all sensors share a device."""
+    coord = MagicMock()
+    coord.home_currency = "GBP"
+
+    chris_balance = BalanceSensor(coord, entry, "abc123", "Chris", "GBP")
+    slav_balance = BalanceSensor(coord, entry, "def456", "Slav", "GBP")
+    chris_spending = SpendingMonthSensor(coord, entry, "abc123", "Chris", "GBP")
+    slav_spending = SpendingMonthSensor(coord, entry, "def456", "Slav", "GBP")
+    total_spending = SpendingTotalMonthSensor(coord, entry, "GBP")
+    last_expense = LastExpenseSensor(coord, entry)
+
+    # Names — HA combines device name "Splitsmart" with these to form entity_ids:
+    #   sensor.splitsmart_balance_chris, sensor.splitsmart_balance_slav,
+    #   sensor.splitsmart_spending_this_month_chris, sensor.splitsmart_spending_this_month_slav,
+    #   sensor.splitsmart_total_spending_this_month, sensor.splitsmart_last_expense
+    assert chris_balance.name == "Balance Chris"
+    assert slav_balance.name == "Balance Slav"
+    assert chris_spending.name == "Spending this month Chris"
+    assert slav_spending.name == "Spending this month Slav"
+    assert total_spending._attr_name == "Total spending this month"
+    assert last_expense._attr_name == "Last expense"
+
+    # unique_id is keyed on user_id — stable across display-name renames
+    assert "abc123" in chris_balance._attr_unique_id
+    assert "def456" in slav_balance._attr_unique_id
+    assert "abc123" in chris_spending._attr_unique_id
+    assert "def456" in slav_spending._attr_unique_id
+
+    # All sensors share the same device, identified by (DOMAIN, entry_id)
+    for sensor in [chris_balance, slav_balance, chris_spending, slav_spending, total_spending, last_expense]:
+        info = sensor.device_info
+        assert info is not None
+        assert (DOMAIN, "test_entry") in info["identifiers"]
+        assert info["name"] == "Splitsmart"
+        assert info["model"] == "Household finance"
 
 
 # config_flow tests require Linux/phcc (ha_integration — pytest -m ha_integration)

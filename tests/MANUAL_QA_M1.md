@@ -3,19 +3,21 @@
 Prerequisites: integration loaded, two HA users configured. This checklist uses
 Chris (user_id `abc123`) and Slav (user_id `def456`), home currency GBP.
 
-> **Entity ID note.** The code derives entity_ids from the sensor `name` property,
-> not from the plan's documented pattern. The actual IDs are:
+> **Entity IDs.** Sensors are attached to a device named "Splitsmart". With
+> `_attr_has_entity_name = True`, HA prepends the device name to form the entity_id.
+> Display names are resolved from the HA user registry at setup time; the IDs below
+> assume the two HA users are named **Chris** and **Slav**.
 >
-> | Sensor | Actual entity_id |
+> | Sensor | entity_id |
 > |---|---|
-> | Chris's balance | `sensor.balance_abc123` |
-> | Slav's balance | `sensor.balance_def456` |
-> | Chris's monthly spend | `sensor.spending_this_month_abc123` |
-> | Slav's monthly spend | `sensor.spending_this_month_def456` |
-> | Household monthly total | `sensor.total_spending_this_month` |
-> | Last expense | `sensor.last_expense` |
+> | Chris's balance | `sensor.splitsmart_balance_chris` |
+> | Slav's balance | `sensor.splitsmart_balance_slav` |
+> | Chris's monthly spend | `sensor.splitsmart_spending_this_month_chris` |
+> | Slav's monthly spend | `sensor.splitsmart_spending_this_month_slav` |
+> | Household monthly total | `sensor.splitsmart_total_spending_this_month` |
+> | Last expense | `sensor.splitsmart_last_expense` |
 >
-> Substitute your real user_ids for `abc123` / `def456`.
+> If your HA user display names differ, substitute accordingly.
 
 ---
 
@@ -48,12 +50,12 @@ Enable "Return response" — expect `{"id": "ex_<ulid>"}`.
 
 | Entity | State | Key attributes |
 |---|---|---|
-| `sensor.balance_abc123` | `20.0` | `per_partner: {def456: 20.0}`, `home_currency: GBP` |
-| `sensor.balance_def456` | `-20.0` | `per_partner: {}` (Slav owes, key is (def456, abc123)) |
-| `sensor.spending_this_month_abc123` | `20.0` | `by_category: {Groceries: 20.0}`, `month: 2026-04` |
-| `sensor.spending_this_month_def456` | `20.0` | `by_category: {Groceries: 20.0}`, `month: 2026-04` |
-| `sensor.total_spending_this_month` | `40.0` | `by_category: {Groceries: 40.0}`, `month: 2026-04` |
-| `sensor.last_expense` | `"Waitrose shop"` | `amount: 40.0`, `date: 2026-04-20`, `paid_by: abc123` |
+| `sensor.splitsmart_balance_chris` | `20.0` | `per_partner: {def456: 20.0}`, `home_currency: GBP` |
+| `sensor.splitsmart_balance_slav` | `-20.0` | `per_partner: {}` (Slav owes, key is (def456, abc123)) |
+| `sensor.splitsmart_spending_this_month_chris` | `20.0` | `by_category: {Groceries: 20.0}`, `month: 2026-04` |
+| `sensor.splitsmart_spending_this_month_slav` | `20.0` | `by_category: {Groceries: 20.0}`, `month: 2026-04` |
+| `sensor.splitsmart_total_spending_this_month` | `40.0` | `by_category: {Groceries: 40.0}`, `month: 2026-04` |
+| `sensor.splitsmart_last_expense` | `"Waitrose shop"` | `amount: 40.0`, `date: 2026-04-20`, `paid_by: abc123` |
 
 Notes on `per_partner`: the balance sensor exposes `per_partner[b]` only for pairs `(user, b)` where the current user is `a`. After this expense, Slav owes Chris £20, so the pairwise entry is keyed `(def456, abc123)`. `sensor.balance_abc123.per_partner` will therefore be `{def456: 20.0}` (Chris is owed £20 by Slav); `sensor.balance_def456.per_partner` will be `{}` because Slav is `b` in the pair, not `a`.
 
@@ -76,12 +78,12 @@ Enable "Return response" — expect `{"id": "sl_<ulid>"}`.
 
 | Entity | State | Key attributes |
 |---|---|---|
-| `sensor.balance_abc123` | `0.0` | `per_partner: {def456: 0.0}` or key absent |
-| `sensor.balance_def456` | `0.0` | — |
-| `sensor.spending_this_month_abc123` | `20.0` | unchanged — settlements don't affect spending |
-| `sensor.spending_this_month_def456` | `20.0` | unchanged |
-| `sensor.total_spending_this_month` | `40.0` | unchanged |
-| `sensor.last_expense` | `"Waitrose shop"` | unchanged |
+| `sensor.splitsmart_balance_chris` | `0.0` | `per_partner: {def456: 0.0}` or key absent |
+| `sensor.splitsmart_balance_slav` | `0.0` | — |
+| `sensor.splitsmart_spending_this_month_chris` | `20.0` | unchanged — settlements don't affect spending |
+| `sensor.splitsmart_spending_this_month_slav` | `20.0` | unchanged |
+| `sensor.splitsmart_total_spending_this_month` | `40.0` | unchanged |
+| `sensor.splitsmart_last_expense` | `"Waitrose shop"` | unchanged |
 
 ---
 
@@ -92,13 +94,13 @@ To read any sensor value from Developer Tools → Services:
 ```yaml
 # This is a read via the HA states API, not a service call.
 # In Developer Tools → States, filter by entity_id.
-# Or use Template:  {{ states('sensor.balance_abc123') }}
+# Or use Template:  {{ states('sensor.splitsmart_balance_chris') }}
 ```
 
 Spot-check attributes in Developer Tools → States → click the entity:
 - `home_currency` should be `GBP` on all monetary sensors.
 - `month` on spending sensors should be `2026-04` when run in April 2026.
-- `expense_id` on `sensor.last_expense` should match the `id` returned by `add_expense`.
+- `expense_id` on `sensor.splitsmart_last_expense` should match the `id` returned by `add_expense`.
 
 ---
 
@@ -156,54 +158,43 @@ Spot-check attributes in Developer Tools → States → click the entity:
 
 ### §4 Sensor entity_id pattern
 
-> **Plan:**
-> ```
-> sensor.splitsmart_balance_<user>
-> sensor.splitsmart_spending_<user>_month
-> sensor.splitsmart_spending_total_month
-> sensor.splitsmart_last_expense
-> ```
+> **Resolved in post-M1 fix commit.**
 >
-> **Code** ([sensor.py:110](../custom_components/splitsmart/sensor.py#L110), [sensor.py:158](../custom_components/splitsmart/sensor.py#L158), [sensor.py:205](../custom_components/splitsmart/sensor.py#L205), [sensor.py:244](../custom_components/splitsmart/sensor.py#L244)): Names are `f"Balance {user_id}"`, `f"Spending this month {user_id}"`, `"Total spending this month"`, `"Last expense"`. No device_info is set, so `_attr_has_entity_name = True` does not add a "splitsmart" prefix. HA slugifies the name directly:
->
-> | Plan | Actual |
-> |---|---|
-> | `sensor.splitsmart_balance_abc123` | `sensor.balance_abc123` |
-> | `sensor.splitsmart_spending_abc123_month` | `sensor.spending_this_month_abc123` |
-> | `sensor.splitsmart_spending_total_month` | `sensor.total_spending_this_month` |
-> | `sensor.splitsmart_last_expense` | `sensor.last_expense` |
->
-> **Assessment:** Unreconciled difference. The documented patterns are what automation authors and integration tests will reference. Either add a `device_info` with name "Splitsmart" to prefix the entity_ids, or update the plan and test assertions to match the actual slugs. Recommend resolving before M2.
+> A `device_info` with `name="Splitsmart"`, `model="Household finance"`, and
+> `identifiers={(DOMAIN, entry.entry_id)}` was added to `_SplitsmartSensor`. With
+> `_attr_has_entity_name = True`, HA now prepends the device name to form entity_ids
+> matching the plan's documented pattern.
 
 ---
 
 ### §4 Sensor name uses user_id, not display name
 
-> **Plan:** "Display name is pulled from HA's user registry at entity-init time; if a user is later renamed the sensor updates on next restart."
+> **Resolved in post-M1 fix commit.**
 >
-> **Code** ([sensor.py:110](../custom_components/splitsmart/sensor.py#L110), [sensor.py:158](../custom_components/splitsmart/sensor.py#L158)): `return f"Balance {self._user_id}"` — raw user_id, not the HA display name. No call to `hass.auth.async_get_user(user_id)`.
->
-> **Assessment:** Unreconciled difference. Sensors will be labelled `Balance abc123` rather than `Balance Chris`, which is poor UX and contradicts the plan. The fix is straightforward: resolve the display name during `async_setup_entry` and pass it into the sensor constructor. Recommend fixing before M2.
+> `async_setup_entry` now calls `await hass.auth.async_get_user(user_id)` for each
+> participant and passes the resolved display name into the sensor constructor. Falls
+> back to `user_id` if the user has been deleted. Unique IDs remain keyed on `user_id`
+> (stable across renames).
 
 ---
 
 ### §2.2 `build_settlement_record` drops `created_by`
 
-> **Plan:** `build_settlement_record` signature includes `created_by: str`.
+> **Resolved in post-M1 fix commit.**
 >
-> **Code** ([ledger.py:394–418](../custom_components/splitsmart/ledger.py#L394)): The parameter is accepted but is not written into the returned dict. Settlement records have no `created_by` field on disk.
->
-> **Assessment:** Unreconciled difference. The expense record does store `created_by` ([ledger.py:376](../custom_components/splitsmart/ledger.py#L376)), so settlements are inconsistent. Minor audit-trail gap. Fix before M2.
+> `build_settlement_record` now writes `"created_by": created_by` into the returned
+> dict, consistent with `build_expense_record`. A test in `test_ledger.py` asserts the
+> field is present on the returned record.
 
 ---
 
 ### §3 services.yaml – edit/delete fields lack descriptions and examples
 
-> **Plan intent:** "I want to eyeball that every service renders usefully in Developer Tools → Services."
+> **Resolved in post-M1 fix commit.**
 >
-> **Code** ([services.yaml:100–222](../custom_components/splitsmart/services.yaml#L100)): `edit_expense`, `edit_settlement`, `delete_expense`, and `delete_settlement` fields beyond `id` and `reason` have `name` only — no `description`, no `example`. In Developer Tools, a tester filling in `edit_expense` will see unlabelled fields for date, paid_by, amount, categories, and notes.
->
-> **Assessment:** Acceptable simplification for M1, but a usability gap. The `add_expense` fields' descriptions and examples should be copied across to `edit_expense`. Low effort; recommend doing before M2 release prep.
+> All fields in `edit_expense`, `delete_expense`, `edit_settlement`, and
+> `delete_settlement` now have `description` and `example` entries matching the style
+> of `add_expense`.
 
 ---
 

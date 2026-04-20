@@ -111,42 +111,55 @@ edit_expense:
         text:
     reason:
       name: Reason
-      description: Optional reason for the edit (stored in the tombstone).
+      description: Optional reason stored with the tombstone for audit purposes.
       required: false
       selector:
         text:
     date:
       name: Date
+      description: Replacement date of the expense (YYYY-MM-DD).
       required: true
+      example: "2026-04-15"
       selector:
         date:
     description:
       name: Description
+      description: Short description of the expense.
       required: true
+      example: "Tesco Metro"
       selector:
         text:
     paid_by:
       name: Paid by
+      description: HA user ID of the person who paid.
       required: true
+      example: "user_abc123"
       selector:
         text:
     amount:
       name: Amount
+      description: Total amount paid.
       required: true
+      example: 82.40
       selector:
         number:
           min: 0.01
           step: 0.01
     categories:
       name: Categories
+      description: >
+        List of category allocations. Each entry has name, home_amount, and
+        split (method + shares). See documentation for the full schema.
       required: true
       selector:
         object:
     notes:
       name: Notes
+      description: Optional free-text note.
       required: false
       selector:
         text:
+          multiline: true
 
 delete_expense:
   name: Delete expense
@@ -154,68 +167,86 @@ delete_expense:
   fields:
     id:
       name: Expense ID
+      description: The ex_ id of the expense to delete.
       required: true
+      example: "ex_01J9XABCDEFG"
       selector:
         text:
     reason:
       name: Reason
+      description: Optional reason stored with the tombstone for audit purposes.
       required: false
       selector:
         text:
 
 edit_settlement:
   name: Edit settlement
-  description: Replace an existing settlement with new data.
+  description: Replace an existing settlement with new data. The original is tombstoned; a new settlement record is created.
   fields:
     id:
       name: Settlement ID
+      description: The sl_ id of the settlement to replace.
       required: true
+      example: "sl_01J9XABCDEFG"
       selector:
         text:
     reason:
       name: Reason
+      description: Optional reason stored with the tombstone for audit purposes.
       required: false
       selector:
         text:
     date:
       name: Date
+      description: Replacement date the payment was made (YYYY-MM-DD).
       required: true
+      example: "2026-04-20"
       selector:
         date:
     from_user:
       name: From user
+      description: HA user ID of the person paying.
       required: true
+      example: "user_def456"
       selector:
         text:
     to_user:
       name: To user
+      description: HA user ID of the person receiving the payment.
       required: true
+      example: "user_abc123"
       selector:
         text:
     amount:
       name: Amount
+      description: Amount transferred.
       required: true
+      example: 20.00
       selector:
         number:
           min: 0.01
           step: 0.01
     notes:
       name: Notes
+      description: Optional free-text note.
       required: false
       selector:
         text:
 
 delete_settlement:
   name: Delete settlement
-  description: Tombstone a settlement.
+  description: Tombstone a settlement. Balance recalculates as if it never existed.
   fields:
     id:
       name: Settlement ID
+      description: The sl_ id of the settlement to delete.
       required: true
+      example: "sl_01J9XABCDEFG"
       selector:
         text:
     reason:
       name: Reason
+      description: Optional reason stored with the tombstone for audit purposes.
       required: false
       selector:
         text:

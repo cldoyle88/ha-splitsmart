@@ -6,27 +6,28 @@
   "description": "Lovelace custom card for the Splitsmart HA integration.",
   "scripts": {
     "build": "rollup -c",
-    "build:prod": "NODE_ENV=production rollup -c",
+    "build:prod": "cross-env NODE_ENV=production rollup -c",
     "watch": "rollup -c -w",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "lit": "^3.2.0",
-    "home-assistant-js-websocket": "^9.3.0"
+    "home-assistant-js-websocket": "^9.3.0",
+    "lit": "^3.2.0"
   },
   "devDependencies": {
+    "@open-wc/testing-helpers": "^3.0.0",
     "@rollup/plugin-node-resolve": "^15.2.0",
-    "@rollup/plugin-typescript": "^12.1.0",
     "@rollup/plugin-terser": "^0.4.4",
+    "@rollup/plugin-typescript": "^12.1.0",
+    "@types/node": "^20.0.0",
+    "@vitest/browser": "^2.0.0",
+    "cross-env": "^10.1.0",
+    "jsdom": "^25.0.0",
     "rollup": "^4.20.0",
     "tslib": "^2.6.0",
     "typescript": "^5.5.0",
-    "@types/node": "^20.0.0",
-    "vitest": "^2.0.0",
-    "@vitest/browser": "^2.0.0",
-    "jsdom": "^25.0.0",
-    "@open-wc/testing-helpers": "^3.0.0"
+    "vitest": "^2.0.0"
   }
 }

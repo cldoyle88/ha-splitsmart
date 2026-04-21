@@ -4,7 +4,8 @@
 // unpack the typed response. Views never talk to hass directly; they go
 // through this module so the websocket contract lives in one place.
 //
-// Writes (add/edit/delete) return {id} from the existing M1 services.
+// Writes (add/edit/delete) return void; the websocket subscription delivers
+// the resulting record via delta event within ~100ms.
 // Reads go over the step-3 websocket commands.
 
 import type {
@@ -111,67 +112,46 @@ export interface EditSettlementPayload extends AddSettlementPayload {
   reason?: string | null;
 }
 
-export interface IdResponse {
-  id: string;
-}
-
-async function callWithResponse(
-  hass: HomeAssistant,
-  service: string,
-  data: Record<string, unknown>,
-): Promise<IdResponse> {
-  const result = (await hass.callService(DOMAIN, service, data, {
-    return_response: true,
-  })) as { response?: IdResponse } | IdResponse | undefined;
-
-  // HA wraps service responses in { response: {...} } on some versions;
-  // others return the raw object. Accept both shapes.
-  if (result && typeof result === 'object' && 'response' in result) {
-    return (result as { response: IdResponse }).response;
-  }
-  return (result as IdResponse) ?? { id: '' };
-}
-
-export function addExpense(
+export async function addExpense(
   hass: HomeAssistant,
   payload: AddExpensePayload,
-): Promise<IdResponse> {
-  return callWithResponse(hass, 'add_expense', { ...payload });
+): Promise<void> {
+  await hass.callService(DOMAIN, 'add_expense', { ...payload });
 }
 
-export function editExpense(
+export async function editExpense(
   hass: HomeAssistant,
   payload: EditExpensePayload,
-): Promise<IdResponse> {
-  return callWithResponse(hass, 'edit_expense', { ...payload });
+): Promise<void> {
+  await hass.callService(DOMAIN, 'edit_expense', { ...payload });
 }
 
-export function deleteExpense(
+export async function deleteExpense(
   hass: HomeAssistant,
   id: string,
   reason?: string,
-): Promise<IdResponse> {
-  return callWithResponse(hass, 'delete_expense', { id, ...(reason ? { reason } : {}) });
+): Promise<void> {
+  await hass.callService(DOMAIN, 'delete_expense', { id, ...(reason ? { reason } : {}) });
 }
 
-export function addSettlement(
+export async function addSettlement(
   hass: HomeAssistant,
   payload: AddSettlementPayload,
-): Promise<IdResponse> {
-  return callWithResponse(hass, 'add_settlement', { ...payload });
+): Promise<void> {
+  await hass.callService(DOMAIN, 'add_settlement', { ...payload });
 }
 
-export function editSettlement(
+export async function editSettlement(
   hass: HomeAssistant,
   payload: EditSettlementPayload,
-): Promise<IdResponse> {
-  return callWithResponse(hass, 'edit_settlement', { ...payload });
+): Promise<void> {
+  await hass.callService(DOMAIN, 'edit_settlement', { ...payload });
 }
 
-export function deleteSettlement(
+export async function deleteSettlement(
   hass: HomeAssistant,
   id: string,
   reason?: string,
-): Promise<IdResponse> {
-  return callWithResponse(hass, 'delete_settlement', { id, ...(reason ? { reason } : {}) });
+): Promise<void> {
+  await hass.callService(DOMAIN, 'delete_settlement', { id, ...(reason ? { reason } : {}) });
 }

@@ -17,7 +17,7 @@ function makeHass(overrides: Partial<HomeAssistant> = {}): HomeAssistant {
     states: {},
     user: { id: 'u1', name: 'Chris' },
     callWS: vi.fn().mockResolvedValue({}),
-    callService: vi.fn().mockResolvedValue({ response: { id: 'ex_test' } }),
+    callService: vi.fn().mockResolvedValue(undefined),
     connection: {
       subscribeMessage: vi.fn().mockImplementation(async () => () => {}),
     },
@@ -79,7 +79,7 @@ describe('subscribeExpenses', () => {
 });
 
 describe('addExpense', () => {
-  it('sends a splitsmart.add_expense call with return_response', async () => {
+  it('sends a splitsmart.add_expense call', async () => {
     const hass = makeHass();
     const payload = {
       date: '2026-04-20',
@@ -100,28 +100,8 @@ describe('addExpense', () => {
         },
       ],
     };
-    const result = await addExpense(hass, payload);
-    expect(hass.callService).toHaveBeenCalledWith(
-      'splitsmart',
-      'add_expense',
-      payload,
-      { return_response: true },
-    );
-    expect(result).toEqual({ id: 'ex_test' });
-  });
-
-  it('accepts response without {response: ...} wrapper', async () => {
-    const hass = makeHass({
-      callService: vi.fn().mockResolvedValue({ id: 'ex_unwrapped' }),
-    });
-    const result = await addExpense(hass, {
-      date: '2026-04-20',
-      description: 'X',
-      paid_by: 'u1',
-      amount: 1,
-      categories: [],
-    });
-    expect(result).toEqual({ id: 'ex_unwrapped' });
+    await addExpense(hass, payload);
+    expect(hass.callService).toHaveBeenCalledWith('splitsmart', 'add_expense', payload);
   });
 });
 
@@ -148,23 +128,16 @@ describe('deleteExpense', () => {
   it('sends {id} without reason when none supplied', async () => {
     const hass = makeHass();
     await deleteExpense(hass, 'ex_01');
-    expect(hass.callService).toHaveBeenCalledWith(
-      'splitsmart',
-      'delete_expense',
-      { id: 'ex_01' },
-      { return_response: true },
-    );
+    expect(hass.callService).toHaveBeenCalledWith('splitsmart', 'delete_expense', { id: 'ex_01' });
   });
 
   it('adds reason when supplied', async () => {
     const hass = makeHass();
     await deleteExpense(hass, 'ex_01', 'mistake');
-    expect(hass.callService).toHaveBeenCalledWith(
-      'splitsmart',
-      'delete_expense',
-      { id: 'ex_01', reason: 'mistake' },
-      { return_response: true },
-    );
+    expect(hass.callService).toHaveBeenCalledWith('splitsmart', 'delete_expense', {
+      id: 'ex_01',
+      reason: 'mistake',
+    });
   });
 });
 
@@ -177,12 +150,12 @@ describe('settlement services', () => {
       to_user: 'u1',
       amount: 40,
     });
-    expect(hass.callService).toHaveBeenCalledWith(
-      'splitsmart',
-      'add_settlement',
-      { date: '2026-04-21', from_user: 'u2', to_user: 'u1', amount: 40 },
-      { return_response: true },
-    );
+    expect(hass.callService).toHaveBeenCalledWith('splitsmart', 'add_settlement', {
+      date: '2026-04-21',
+      from_user: 'u2',
+      to_user: 'u1',
+      amount: 40,
+    });
   });
 
   it('editSettlement includes id', async () => {
@@ -205,11 +178,8 @@ describe('settlement services', () => {
   it('deleteSettlement sends {id}', async () => {
     const hass = makeHass();
     await deleteSettlement(hass, 'sl_01');
-    expect(hass.callService).toHaveBeenCalledWith(
-      'splitsmart',
-      'delete_settlement',
-      { id: 'sl_01' },
-      { return_response: true },
-    );
+    expect(hass.callService).toHaveBeenCalledWith('splitsmart', 'delete_settlement', {
+      id: 'sl_01',
+    });
   });
 });

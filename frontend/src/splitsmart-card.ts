@@ -9,7 +9,7 @@
 import { LitElement, html, css, type PropertyValues } from 'lit';
 import { customElement, property, state } from 'lit/decorators.js';
 
-import { ensureFontsLoaded } from './styles';
+import { baseStyles, installGlobalStyles, typography } from './styles';
 import type { HomeAssistant, SplitsmartCardConfig } from './types';
 
 export const VERSION = '0.1.0-m2';
@@ -38,7 +38,7 @@ export class SplitsmartCard extends LitElement {
 
   connectedCallback(): void {
     super.connectedCallback();
-    ensureFontsLoaded();
+    installGlobalStyles();
   }
 
   protected firstUpdated(_changed: PropertyValues): void {
@@ -50,49 +50,34 @@ export class SplitsmartCard extends LitElement {
     return html`
       <ha-card>
         <div class="shell">
-          <div class="title">Splitsmart</div>
-          <div class="caption">
+          <div class="ss-text-display">Splitsmart</div>
+          <div class="ss-text-caption">
             ${this.hass
-              ? html`View: <span class="mono">${view}</span> · v${VERSION}`
-              : html`<span class="mono">Waiting for Home Assistant…</span>`}
+              ? html`View: <span class="ss-mono-caption">${view}</span> · v${VERSION}`
+              : html`<span class="ss-mono-caption">Waiting for Home Assistant…</span>`}
           </div>
         </div>
       </ha-card>
     `;
   }
 
-  static styles = css`
-    :host {
-      display: block;
-    }
-    ha-card {
-      background: var(--card-background-color, #ffffff);
-      color: var(--primary-text-color, #1a1a1a);
-      border-radius: var(--ha-card-border-radius, 12px);
-    }
-    .shell {
-      padding: 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-      font-family: 'DM Sans', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-    }
-    .title {
-      font-size: 28px;
-      font-weight: 600;
-      line-height: 1.2;
-      color: var(--primary-text-color, #1a1a1a);
-    }
-    .caption {
-      font-size: 13px;
-      color: var(--secondary-text-color, #5a5a5a);
-      line-height: 1.4;
-    }
-    .mono {
-      font-family: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-      font-variant-numeric: tabular-nums;
-    }
-  `;
+  static styles = [
+    baseStyles,
+    typography,
+    css`
+      ha-card {
+        background: var(--card-background-color, #ffffff);
+        color: var(--primary-text-color, #1a1a1a);
+        border-radius: var(--ss-card-radius);
+      }
+      .shell {
+        padding: var(--ss-space-5);
+        display: flex;
+        flex-direction: column;
+        gap: var(--ss-space-1);
+      }
+    `,
+  ];
 }
 
 // Register an entry in the Lovelace "Add Card" gallery. Preview artwork

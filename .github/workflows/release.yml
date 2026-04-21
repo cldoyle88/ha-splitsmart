@@ -1,0 +1,52 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and attach splitsmart.zip
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+
+      - name: Build frontend bundle (production)
+        working-directory: frontend
+        run: npm run build:prod
+
+      # SPEC §18 / hacs.json declares zip_release: true with filename
+      # splitsmart.zip. HACS downloads that asset directly, so the zip
+      # must contain the contents of custom_components/splitsmart/ (not
+      # the directory itself) for HACS to extract them into place.
+      - name: Package splitsmart.zip
+        run: |
+          cd custom_components/splitsmart
+          zip -r "$GITHUB_WORKSPACE/splitsmart.zip" . -x "__pycache__/*" "*.pyc"
+          cd "$GITHUB_WORKSPACE"
+          echo "Package contents:"
+          unzip -l splitsmart.zip | head -40
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: splitsmart.zip
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref, '-m') }}

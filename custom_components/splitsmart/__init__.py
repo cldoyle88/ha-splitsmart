@@ -77,6 +77,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
         async_register_services(hass)
 
+    # Register websocket commands once per HA instance.
+    from .websocket_api import async_register_websocket_commands
+
+    async_register_websocket_commands(hass)
+
     # Register the frontend fonts static path once per HA instance. The bundle
     # static path and Lovelace auto-registration land in step 4 of M2.
     if not hass.data[DOMAIN].get("_fonts_registered"):

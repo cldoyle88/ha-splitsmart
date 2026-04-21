@@ -34,6 +34,7 @@ import type {
 } from './types';
 import './views/home-view';
 import './views/ledger-view';
+import './views/add-expense-view';
 
 export const VERSION = '0.1.0-m2';
 
@@ -197,6 +198,14 @@ export class SplitsmartCard extends LitElement {
             .query=${this._route.query}
             .locale=${this._locale()}
           ></ss-ledger-view>
+        `;
+      case 'add':
+        return html`
+          <ss-add-expense-view
+            .hass=${this.hass}
+            .config=${this._splitsmartConfig}
+            .locale=${this._locale()}
+          ></ss-add-expense-view>
         `;
       case 'home':
       default:

@@ -81,6 +81,11 @@ SERVICE_DELETE_SETTLEMENT = "delete_settlement"
 # Coordinator
 COORDINATOR_UPDATE_INTERVAL_MINUTES = 5
 
+# Frontend static paths (M2)
+STATIC_URL = "/splitsmart-static"
+BUNDLE_FILENAME = "splitsmart-card.js"
+FONTS_DIRNAME = "fonts"
+
 # Sensor unique id fragments
 SENSOR_BALANCE = "balance"
 SENSOR_SPENDING_MONTH = "spending_month"

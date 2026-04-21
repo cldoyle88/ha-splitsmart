@@ -83,7 +83,9 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
     """Add (or refresh) the module-type Lovelace resource pointing at the bundle.
 
     On YAML-mode Lovelace we can't mutate resources programmatically, so we
-    log the snippet the user needs.
+    log the snippet the user needs. Always fires a final INFO line so
+    home-assistant.log surfaces a registered/not-registered signal at
+    startup without anyone having to poke the Lovelace storage file.
     """
     version = await _integration_version(hass)
     url = _bundle_url_for(version)
@@ -97,27 +99,35 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
             "ui-lovelace.yaml resources:\n  - url: %s\n    type: module",
             url,
         )
-        return
+    else:
+        # Some older / alternative collection implementations don't need or
+        # expose async_load — suppress the one specific miss.
+        with contextlib.suppress(AttributeError):
+            await resources.async_load()
 
-    # Some older / alternative collection implementations don't need or
-    # expose async_load — suppress the one specific miss.
-    with contextlib.suppress(AttributeError):
-        await resources.async_load()
+        items = list(_iter_resource_items(resources))
+        base = f"{STATIC_URL}/{BUNDLE_FILENAME}"
 
-    items = list(_iter_resource_items(resources))
-    base = f"{STATIC_URL}/{BUNDLE_FILENAME}"
+        existing = next(
+            (
+                item
+                for item in items
+                if isinstance(item, dict) and str(item.get("url", "")).split("?", 1)[0] == base
+            ),
+            None,
+        )
 
-    for item in items:
-        if not isinstance(item, dict):
-            continue
-        existing_url = str(item.get("url", ""))
-        if existing_url.split("?", 1)[0] == base:
-            if existing_url == url:
-                return  # Already current.
-            await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
-            return
+        if existing is None:
+            await resources.async_create_item({"res_type": "module", "url": url})
+        elif existing.get("url") != url:
+            await resources.async_update_item(existing["id"], {"res_type": "module", "url": url})
+        # else: already current at this version; no action needed.
 
-    await resources.async_create_item({"res_type": "module", "url": url})
+    _LOGGER.info(
+        "Splitsmart card registered at %s (Lovelace mode: %s)",
+        url,
+        getattr(lovelace, "mode", "unknown") if lovelace else "unknown",
+    )
 
 
 def _lovelace_resources(lovelace: Any | None) -> Any | None:

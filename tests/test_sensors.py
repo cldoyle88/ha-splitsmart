@@ -309,6 +309,8 @@ def test_sensor_class_attributes(entry: MagicMock):
 
     le = LastExpenseSensor(coord, entry)
     assert "last_expense" in le._attr_unique_id
+    assert le._attr_state_class is None
+    assert le._attr_device_class is None
 
 
 # ------------------------------------------------------------------ entity names and device

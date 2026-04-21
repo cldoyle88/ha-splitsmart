@@ -261,6 +261,9 @@ class SpendingTotalMonthSensor(_SplitsmartSensor):
 class LastExpenseSensor(_SplitsmartSensor):
     """Description of the most recent shared expense."""
 
+    _attr_state_class = None
+    _attr_device_class = None
+
     def __init__(
         self,
         coordinator: SplitsmartCoordinator,

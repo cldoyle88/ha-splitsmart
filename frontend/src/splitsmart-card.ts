@@ -33,6 +33,7 @@ import type {
   SplitsmartConfig,
 } from './types';
 import './views/home-view';
+import './views/ledger-view';
 
 export const VERSION = '0.1.0-m2';
 
@@ -187,6 +188,16 @@ export class SplitsmartCard extends LitElement {
     }
 
     switch (this._route.view) {
+      case 'ledger':
+        return html`
+          <ss-ledger-view
+            .config=${this._splitsmartConfig}
+            .expenses=${this._expenses}
+            .settlements=${this._settlements}
+            .query=${this._route.query}
+            .locale=${this._locale()}
+          ></ss-ledger-view>
+        `;
       case 'home':
       default:
         return html`

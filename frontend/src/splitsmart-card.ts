@@ -36,6 +36,7 @@ import './views/home-view';
 import './views/ledger-view';
 import './views/add-expense-view';
 import './views/settle-up-view';
+import './views/expense-detail-sheet';
 
 export const VERSION = '0.1.0-m2';
 
@@ -51,6 +52,11 @@ export class SplitsmartCard extends LitElement {
 
   @state()
   private _route: Route = { view: 'home', query: {} };
+
+  /** Last non-detail route, so closing a detail sheet returns the user
+   *  to the Ledger they came from (or home if they deep-linked). */
+  @state()
+  private _backgroundRoute: Route = { view: 'home', query: {} };
 
   @state()
   private _splitsmartConfig: SplitsmartConfig | null = null;
@@ -97,8 +103,12 @@ export class SplitsmartCard extends LitElement {
     installGlobalStyles();
     this._routeUnsub = subscribeRoute((r) => {
       this._route = r;
+      if (r.view !== 'expense' && r.view !== 'settlement') {
+        this._backgroundRoute = r;
+      }
     });
     this.addEventListener('ss-navigate', this._onNavigate as EventListener);
+    this.addEventListener('ss-open-detail', this._onOpenDetail as EventListener);
   }
 
   disconnectedCallback(): void {
@@ -108,6 +118,7 @@ export class SplitsmartCard extends LitElement {
     this._routeUnsub = null;
     this._subUnsub = null;
     this.removeEventListener('ss-navigate', this._onNavigate as EventListener);
+    this.removeEventListener('ss-open-detail', this._onOpenDetail as EventListener);
   }
 
   protected firstUpdated(_changed: PropertyValues): void {
@@ -166,6 +177,14 @@ export class SplitsmartCard extends LitElement {
     if (typeof route === 'string') navigate(route);
   };
 
+  private _onOpenDetail = (e: Event) => {
+    const id = (e as CustomEvent<{ expense_id?: string; settlement_id?: string }>).detail
+      ?.expense_id;
+    const sid = (e as CustomEvent<{ settlement_id?: string }>).detail?.settlement_id;
+    if (id) navigate(`expense/${id}`);
+    else if (sid) navigate(`settlement/${sid}`);
+  };
+
   private _locale(): string {
     return resolveLocale(this.hass?.locale?.language);
   }
@@ -189,14 +208,53 @@ export class SplitsmartCard extends LitElement {
       }
     }
 
-    switch (this._route.view) {
+    const routeForPrimary =
+      this._route.view === 'expense' || this._route.view === 'settlement'
+        ? this._backgroundRoute
+        : this._route;
+
+    const primary = this._renderRoute(routeForPrimary, balances, pairwise);
+
+    if (this._route.view === 'expense') {
+      const expense = this._expenses.find((e) => e.id === this._route.param) ?? null;
+      return html`
+        ${primary}
+        <ss-expense-detail-sheet
+          .hass=${this.hass}
+          .config=${this._splitsmartConfig}
+          .expense=${expense}
+          .locale=${this._locale()}
+          @close=${this._onDetailClose}
+        ></ss-expense-detail-sheet>
+      `;
+    }
+
+    return primary;
+  }
+
+  private _onDetailClose = (): void => {
+    const back = this._backgroundRoute;
+    const qs = Object.entries(back.query)
+      .filter(([, v]) => v)
+      .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+      .join('&');
+    const param = back.param ? `/${back.param}` : '';
+    navigate(qs ? `${back.view}${param}?${qs}` : `${back.view}${param}`);
+  };
+
+  private _renderRoute(
+    route: Route,
+    balances: Record<string, number>,
+    pairwise: Record<string, number>,
+  ) {
+    switch (route.view) {
       case 'ledger':
         return html`
           <ss-ledger-view
             .config=${this._splitsmartConfig}
             .expenses=${this._expenses}
             .settlements=${this._settlements}
-            .query=${this._route.query}
+            .query=${route.query}
             .locale=${this._locale()}
           ></ss-ledger-view>
         `;

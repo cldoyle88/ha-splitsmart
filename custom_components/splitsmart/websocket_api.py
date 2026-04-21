@@ -133,9 +133,7 @@ def _not_found(connection: Any, msg_id: int) -> None:
 # --------------------------------------------------------------------- handlers
 
 
-async def _handle_get_config(
-    hass: HomeAssistant, connection: Any, msg: dict[str, Any]
-) -> None:
+async def _handle_get_config(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
     resolved = _resolve_entry(hass)
     if resolved is None:
         _not_found(connection, msg["id"])
@@ -156,9 +154,7 @@ async def _handle_get_config(
 
     home_currency = entry.options.get(CONF_HOME_CURRENCY, entry.data[CONF_HOME_CURRENCY])
     categories = entry.options.get(CONF_CATEGORIES, entry.data[CONF_CATEGORIES])
-    named_splits = entry.options.get(
-        CONF_NAMED_SPLITS, entry.data.get(CONF_NAMED_SPLITS, {})
-    )
+    named_splits = entry.options.get(CONF_NAMED_SPLITS, entry.data.get(CONF_NAMED_SPLITS, {}))
 
     connection.send_result(
         msg["id"],
@@ -173,9 +169,7 @@ async def _handle_get_config(
     )
 
 
-async def _handle_list_expenses(
-    hass: HomeAssistant, connection: Any, msg: dict[str, Any]
-) -> None:
+async def _handle_list_expenses(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
     resolved = _resolve_entry(hass)
     if resolved is None:
         _not_found(connection, msg["id"])
@@ -209,9 +203,7 @@ async def _handle_list_expenses(
     )
 
 
-async def _handle_subscribe(
-    hass: HomeAssistant, connection: Any, msg: dict[str, Any]
-) -> None:
+async def _handle_subscribe(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
     resolved = _resolve_entry(hass)
     if resolved is None:
         _not_found(connection, msg["id"])

@@ -13,6 +13,7 @@ paste into their ``ui-lovelace.yaml``.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from pathlib import Path
 from typing import Any
@@ -98,11 +99,10 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
         )
         return
 
-    try:
+    # Some older / alternative collection implementations don't need or
+    # expose async_load — suppress the one specific miss.
+    with contextlib.suppress(AttributeError):
         await resources.async_load()
-    except AttributeError:
-        # Some older / alternative implementations don't need explicit load.
-        pass
 
     items = list(_iter_resource_items(resources))
     base = f"{STATIC_URL}/{BUNDLE_FILENAME}"
@@ -114,9 +114,7 @@ async def _register_lovelace_resource(hass: HomeAssistant) -> None:
         if existing_url.split("?", 1)[0] == base:
             if existing_url == url:
                 return  # Already current.
-            await resources.async_update_item(
-                item["id"], {"res_type": "module", "url": url}
-            )
+            await resources.async_update_item(item["id"], {"res_type": "module", "url": url})
             return
 
     await resources.async_create_item({"res_type": "module", "url": url})

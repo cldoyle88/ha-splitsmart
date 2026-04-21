@@ -32,7 +32,6 @@ from custom_components.splitsmart.websocket_api import (
     _handle_subscribe,
 )
 
-
 # ------------------------------------------------------------------ fixtures
 
 
@@ -221,7 +220,10 @@ async def test_get_config_includes_historical_inactive_users(
 ):
     entry = _make_entry()
     hass = _make_hass(
-        storage, coordinator, entry, user_map={"u1": "Chris", "u2": "Slav", "u_ghost": "Old Flatmate"}
+        storage,
+        coordinator,
+        entry,
+        user_map={"u1": "Chris", "u2": "Slav", "u_ghost": "Old Flatmate"},
     )
     await _seed_tesco(hass)
     # Inject a historical settlement involving a non-configured user.
@@ -444,9 +446,7 @@ async def test_subscribe_not_found_when_integration_unloaded():
     hass.data = {}
     conn = _make_connection("u1")
 
-    await _handle_subscribe(
-        hass, conn, {"id": 15, "type": "splitsmart/list_expenses/subscribe"}
-    )
+    await _handle_subscribe(hass, conn, {"id": 15, "type": "splitsmart/list_expenses/subscribe"})
 
     conn.send_error.assert_called_once()
     assert conn.send_error.call_args.args[1] == "not_found"

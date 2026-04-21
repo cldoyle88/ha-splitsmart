@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from homeassistant.components.http import StaticPathConfig
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
@@ -16,10 +15,9 @@ from .const import (
     CONF_HOME_CURRENCY,
     CONF_PARTICIPANTS,
     DOMAIN,
-    FONTS_DIRNAME,
-    STATIC_URL,
 )
 from .coordinator import SplitsmartCoordinator
+from .frontend_registration import async_register_frontend
 from .storage import SplitsmartStorage, validate_root
 
 if TYPE_CHECKING:
@@ -82,20 +80,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async_register_websocket_commands(hass)
 
-    # Register the frontend fonts static path once per HA instance. The bundle
-    # static path and Lovelace auto-registration land in step 4 of M2.
-    if not hass.data[DOMAIN].get("_fonts_registered"):
-        frontend_dir = Path(__file__).parent / "frontend"
-        await hass.http.async_register_static_paths(
-            [
-                StaticPathConfig(
-                    url_path=f"{STATIC_URL}/{FONTS_DIRNAME}",
-                    path=str(frontend_dir / FONTS_DIRNAME),
-                    cache_headers=True,
-                ),
-            ]
-        )
-        hass.data[DOMAIN]["_fonts_registered"] = True
+    # Serve the bundle + fonts and auto-register the Lovelace resource.
+    await async_register_frontend(hass)
 
     # Invalidate coordinator when options change
     async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:

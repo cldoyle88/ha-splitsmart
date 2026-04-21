@@ -37,6 +37,7 @@ import './views/ledger-view';
 import './views/add-expense-view';
 import './views/settle-up-view';
 import './views/expense-detail-sheet';
+import './views/settlement-detail-sheet';
 
 export const VERSION = '0.1.0-m2';
 
@@ -226,6 +227,23 @@ export class SplitsmartCard extends LitElement {
           .locale=${this._locale()}
           @close=${this._onDetailClose}
         ></ss-expense-detail-sheet>
+      `;
+    }
+
+    if (this._route.view === 'settlement') {
+      const settlement =
+        this._settlements.find((s) => s.id === this._route.param) ?? null;
+      return html`
+        ${primary}
+        <ss-settlement-detail-sheet
+          .hass=${this.hass}
+          .config=${this._splitsmartConfig}
+          .settlement=${settlement}
+          .expenses=${this._expenses}
+          .settlements=${this._settlements}
+          .locale=${this._locale()}
+          @close=${this._onDetailClose}
+        ></ss-settlement-detail-sheet>
       `;
     }
 

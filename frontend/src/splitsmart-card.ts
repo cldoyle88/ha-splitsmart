@@ -35,6 +35,7 @@ import type {
 import './views/home-view';
 import './views/ledger-view';
 import './views/add-expense-view';
+import './views/settle-up-view';
 
 export const VERSION = '0.1.0-m2';
 
@@ -206,6 +207,16 @@ export class SplitsmartCard extends LitElement {
             .config=${this._splitsmartConfig}
             .locale=${this._locale()}
           ></ss-add-expense-view>
+        `;
+      case 'settle':
+        return html`
+          <ss-settle-up-view
+            .hass=${this.hass}
+            .config=${this._splitsmartConfig}
+            .expenses=${this._expenses}
+            .settlements=${this._settlements}
+            .locale=${this._locale()}
+          ></ss-settle-up-view>
         `;
       case 'home':
       default:

@@ -17,8 +17,7 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "declaration": false,
-    "sourceMap": true,
-    "outDir": "dist"
+    "sourceMap": true
   },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "tests"]

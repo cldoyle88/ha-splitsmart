@@ -24,6 +24,13 @@ name = "ha-splitsmart"
 version = "0.1.0"
 requires-python = ">=3.12"
 
+[tool.setuptools.packages.find]
+# Only discover the HA integration under custom_components. Without this,
+# setuptools' flat-layout auto-discovery trips over the sibling `frontend/`
+# and `tests/` directories at build time.
+include = ["custom_components*"]
+namespaces = true
+
 [project.optional-dependencies]
 test = [
     "pytest>=9.0",

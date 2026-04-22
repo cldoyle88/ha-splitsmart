@@ -19,6 +19,11 @@ from aiohttp import FormData
 from aiohttp import web as aiohttp_web
 from aiohttp.test_utils import TestClient, TestServer
 
+# These tests spin up a real aiohttp TCP server on 127.0.0.1. pytest-socket
+# (activated by pytest-homeassistant-custom-component in CI) blocks socket
+# creation by default — allow loopback so TestServer/TestClient can bind.
+pytestmark = [pytest.mark.allow_hosts(["127.0.0.1"])]
+
 from custom_components.splitsmart.const import CONF_PARTICIPANTS, DOMAIN
 from custom_components.splitsmart.coordinator import SplitsmartCoordinator
 from custom_components.splitsmart.http import SplitsmartUploadView

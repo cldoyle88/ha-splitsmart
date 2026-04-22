@@ -9,6 +9,11 @@ for YAML mode.
 Before running: restart HA so the integration picks up
 `async_register_static_paths` and the auto-registered Lovelace resource.
 
+## Known intermittent issues (seen once in April 2026 QA, not yet reproduced)
+
+- **Two-client edit race** (issue #3): editing from one tab while another tab still has the stale row prefilled can produce a "not found" toast even though the write succeeded on disk. If it reappears: `grep ServiceValidationError home-assistant.log`, tap-expand the error toast for the full text, and note every client currently connected to the ledger.
+- **Multi-category Save button intermittently disabled** (issue #4): traced and confirmed not float drift. If it reappears: in DevTools console run `$0._isValid()` and each of `$0._allocationValid()` / `$0._splitsValid()` / `$0._amount` on the selected `ss-add-expense-view` to see which check returns false, and confirm the bundle URL's `?v=` query matches the installed manifest version (cache-bust check).
+
 ---
 
 ## 1 – First paint on a fresh dashboard

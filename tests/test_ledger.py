@@ -16,6 +16,7 @@ from custom_components.splitsmart.ledger import (
     compute_user_share,
     materialise_expenses,
     materialise_settlements,
+    materialise_staging,
     validate_expense_record,
     validate_settlement_record,
     validate_split,
@@ -141,6 +142,54 @@ def test_materialise_settlements():
     result = materialise_settlements(settlements, [tb])
     assert len(result) == 1
     assert result[0]["id"] == "sl_2"
+
+
+# ------------------------------------------------------------------ materialise_staging
+
+
+def test_materialise_staging_no_tombstones():
+    rows = [{"id": "st_1"}, {"id": "st_2"}]
+    assert materialise_staging(rows, []) == rows
+
+
+def test_materialise_staging_discard_tombstone_drops_row():
+    rows = [{"id": "st_1"}, {"id": "st_2"}]
+    tombstones = [
+        {"id": "tb_1", "target_id": "st_1", "target_type": "staging", "operation": "discard"}
+    ]
+    result = materialise_staging(rows, tombstones)
+    assert len(result) == 1
+    assert result[0]["id"] == "st_2"
+
+
+def test_materialise_staging_promote_tombstone_drops_row():
+    """Promote and discard both remove the staging row. For dedup, the
+    distinction matters (caller filters by operation). For materialisation,
+    either disposition means the row is no longer pending — it's gone."""
+    rows = [{"id": "st_1"}, {"id": "st_2"}]
+    tombstones = [
+        {
+            "id": "tb_1",
+            "target_id": "st_1",
+            "target_type": "staging",
+            "operation": "promote",
+            "replacement_id": "ex_new",
+        }
+    ]
+    result = materialise_staging(rows, tombstones)
+    assert len(result) == 1
+    assert result[0]["id"] == "st_2"
+
+
+def test_materialise_staging_ignores_tombstones_for_other_target_types():
+    rows = [{"id": "st_1"}]
+    tombstones = [
+        # An expense-delete tombstone. st_ prefixes can't collide with ex_
+        # ids, so passing the full shared tombstones list is safe.
+        {"id": "tb_1", "target_id": "ex_1", "target_type": "expense", "operation": "delete"},
+    ]
+    result = materialise_staging(rows, tombstones)
+    assert result == rows
 
 
 # ------------------------------------------------------------------ compute_user_share

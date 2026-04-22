@@ -62,6 +62,22 @@ def materialise_settlements(
     return [s for s in raw_settlements if s["id"] not in targeted]
 
 
+def materialise_staging(
+    raw_staging: list[dict[str, Any]],
+    tombstones: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Return effective staging list for one user.
+
+    Drops any staging row whose id is the target of any tombstone —
+    covering both ``discard`` (user skipped) and ``promote`` (user moved
+    to the shared ledger). Staging ids have the ``st_`` prefix, which
+    can't collide with expense (``ex_``) or settlement (``sl_``) ids, so
+    passing the full tombstones list is safe without a target_type filter.
+    """
+    targeted: set[str] = {tb["target_id"] for tb in tombstones}
+    return [r for r in raw_staging if r["id"] not in targeted]
+
+
 # ------------------------------------------------------------------ share calculation
 
 

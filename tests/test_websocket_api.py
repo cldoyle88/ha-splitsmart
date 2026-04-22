@@ -28,7 +28,12 @@ from custom_components.splitsmart.storage import SplitsmartStorage
 from custom_components.splitsmart.websocket_api import (
     API_VERSION,
     _handle_get_config,
+    _handle_inspect_upload,
     _handle_list_expenses,
+    _handle_list_presets,
+    _handle_list_staging,
+    _handle_list_staging_subscribe,
+    _handle_save_mapping,
     _handle_subscribe,
 )
 
@@ -450,3 +455,348 @@ async def test_subscribe_not_found_when_integration_unloaded():
 
     conn.send_error.assert_called_once()
     assert conn.send_error.call_args.args[1] == "not_found"
+
+
+# ------------------------------------------------------------------ M3 list_staging
+
+
+async def _seed_staging(
+    storage: SplitsmartStorage,
+    coordinator: SplitsmartCoordinator,
+    *,
+    user_id: str,
+    n: int = 1,
+    currency: str = "GBP",
+) -> list[dict[str, Any]]:
+    """Append N synthetic staging rows for user_id and refresh the coordinator."""
+    from custom_components.splitsmart.importer.normalise import dedup_hash
+    from custom_components.splitsmart.storage import new_id
+
+    rows: list[dict[str, Any]] = []
+    for i in range(n):
+        row = {
+            "id": new_id("st"),
+            "uploaded_by": user_id,
+            "uploaded_at": "2026-04-22T10:00:00+01:00",
+            "source": "csv",
+            "date": "2026-04-15",
+            "description": f"Merchant {i}",
+            "amount": 4.50 + i,
+            "currency": currency,
+            "rule_action": "pending",
+            "dedup_hash": dedup_hash(
+                date="2026-04-15",
+                amount=4.50 + i,
+                currency=currency,
+                description=f"Merchant {i}",
+            ),
+        }
+        rows.append(row)
+        await storage.append(storage.staging_path(user_id), row)
+    coordinator.data = await coordinator._async_update_data()
+    return rows
+
+
+async def test_list_staging_returns_callers_rows(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    await _seed_staging(storage, coordinator, user_id="u1", n=3)
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_staging(hass, conn, {"id": 100, "type": "splitsmart/list_staging"})
+
+    conn.send_result.assert_called_once()
+    result = conn.send_result.call_args.args[1]
+    assert result["version"] == API_VERSION
+    assert result["total"] == 3
+    assert len(result["rows"]) == 3
+
+
+async def test_list_staging_includes_staging_tombstones(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """The review UI needs the tombstones to render auto-ignored/promoted tabs."""
+    rows = await _seed_staging(storage, coordinator, user_id="u1", n=2)
+    # Discard one of the rows.
+    await storage.append_tombstone(
+        created_by="u1",
+        target_type="staging",
+        target_id=rows[0]["id"],
+        operation="discard",
+        previous_snapshot=rows[0],
+    )
+    coordinator.data = await coordinator._async_update_data()
+
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_staging(hass, conn, {"id": 101, "type": "splitsmart/list_staging"})
+
+    result = conn.send_result.call_args.args[1]
+    # Effective rows drop by 1; tombstone is listed separately.
+    assert result["total"] == 1
+    assert len(result["tombstones"]) == 1
+    assert result["tombstones"][0]["target_id"] == rows[0]["id"]
+
+
+async def test_list_staging_rejects_request_for_another_users_staging(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """SPEC §7: a participant cannot read another user's staging even if
+    they explicitly pass the user_id argument."""
+    await _seed_staging(storage, coordinator, user_id="u1", n=2)
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u2")
+
+    await _handle_list_staging(
+        hass, conn, {"id": 102, "type": "splitsmart/list_staging", "user_id": "u1"}
+    )
+
+    conn.send_result.assert_not_called()
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "permission_denied"
+
+
+async def test_list_staging_permission_denied_for_non_participant(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u_stranger")
+
+    await _handle_list_staging(hass, conn, {"id": 103, "type": "splitsmart/list_staging"})
+
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "permission_denied"
+
+
+async def test_list_staging_default_scope_is_caller(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """Both users seeded; the response only carries the caller's rows."""
+    await _seed_staging(storage, coordinator, user_id="u1", n=3)
+    await _seed_staging(storage, coordinator, user_id="u2", n=5)
+
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+
+    # u1 sees 3 rows.
+    conn_u1 = _make_connection("u1")
+    await _handle_list_staging(hass, conn_u1, {"id": 104, "type": "splitsmart/list_staging"})
+    assert conn_u1.send_result.call_args.args[1]["total"] == 3
+
+    # u2 sees 5 rows.
+    conn_u2 = _make_connection("u2")
+    await _handle_list_staging(hass, conn_u2, {"id": 105, "type": "splitsmart/list_staging"})
+    assert conn_u2.send_result.call_args.args[1]["total"] == 5
+
+
+# ------------------------------------------------------------------ M3 list_staging/subscribe
+
+
+async def test_list_staging_subscribe_init_and_delta(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    await _seed_staging(storage, coordinator, user_id="u1", n=2)
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_staging_subscribe(
+        hass, conn, {"id": 110, "type": "splitsmart/list_staging/subscribe"}
+    )
+
+    # Init event delivered.
+    assert conn.send_message.call_count == 1
+    init = conn.send_message.call_args.args[0]
+    assert init["event"]["kind"] == "init"
+    assert len(init["event"]["rows"]) == 2
+
+    # Append another row and fire the coordinator listener.
+    await _seed_staging(storage, coordinator, user_id="u1", n=1)
+    coordinator.async_update_listeners()
+    await asyncio.sleep(0)
+
+    # Delta delivered.
+    assert conn.send_message.call_count == 2
+    delta = conn.send_message.call_args.args[0]
+    assert delta["event"]["kind"] == "delta"
+    assert len(delta["event"]["added"]) == 1
+
+
+async def test_list_staging_subscribe_does_not_leak_other_users(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """A subscription on u1 must not see u2's staging deltas."""
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_staging_subscribe(
+        hass, conn, {"id": 111, "type": "splitsmart/list_staging/subscribe"}
+    )
+    init_count = conn.send_message.call_count  # 1 (init)
+
+    # Append to u2's staging — u1's subscription must not fire.
+    await _seed_staging(storage, coordinator, user_id="u2", n=1)
+    coordinator.async_update_listeners()
+    await asyncio.sleep(0)
+
+    assert conn.send_message.call_count == init_count  # no additional delta
+
+
+# ------------------------------------------------------------------ M3 list_presets
+
+
+async def test_list_presets_returns_registry(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_presets(hass, conn, {"id": 120, "type": "splitsmart/list_presets"})
+
+    conn.send_result.assert_called_once()
+    result = conn.send_result.call_args.args[1]
+    names = {p["name"] for p in result["presets"]}
+    assert names == {"Monzo", "Starling", "Revolut", "Splitwise"}
+
+
+async def test_list_presets_permission_denied(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u_stranger")
+
+    await _handle_list_presets(hass, conn, {"id": 121, "type": "splitsmart/list_presets"})
+
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "permission_denied"
+
+
+# ------------------------------------------------------------------ M3 save_mapping
+
+
+async def test_save_mapping_persists_to_disk(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    from custom_components.splitsmart.importer.mapping import load_saved_mappings
+
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    mapping = {
+        "date": "Posted",
+        "description": "Merchant",
+        "amount": "Spent",
+        "currency_default": "GBP",
+        "amount_sign": "expense_positive",
+        "date_format": "auto",
+        "notes_append": [],
+    }
+    await _handle_save_mapping(
+        hass,
+        conn,
+        {
+            "id": 130,
+            "type": "splitsmart/save_mapping",
+            "file_origin_hash": "sha1:abc123",
+            "mapping": mapping,
+        },
+    )
+
+    conn.send_result.assert_called_once()
+    saved = await load_saved_mappings(storage)
+    assert saved["sha1:abc123"] == mapping
+
+
+async def test_save_mapping_permission_denied(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u_stranger")
+
+    await _handle_save_mapping(
+        hass,
+        conn,
+        {
+            "id": 131,
+            "type": "splitsmart/save_mapping",
+            "file_origin_hash": "sha1:abc",
+            "mapping": {},
+        },
+    )
+
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "permission_denied"
+
+
+# ------------------------------------------------------------------ M3 inspect_upload
+
+
+async def test_inspect_upload_returns_preset_and_headers(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator, tmp_path: pathlib.Path
+):
+    import shutil
+    import uuid
+
+    fixture = pathlib.Path(__file__).parent / "fixtures" / "imports" / "monzo_classic.csv"
+    upload_id = str(uuid.uuid4())
+    dest = storage.upload_path(upload_id, "csv")
+    shutil.copyfile(fixture, dest)
+
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_inspect_upload(
+        hass,
+        conn,
+        {"id": 140, "type": "splitsmart/inspect_upload", "upload_id": upload_id},
+    )
+
+    result = conn.send_result.call_args.args[1]
+    assert result["inspection"]["preset"] == "Monzo"
+    assert "Date" in result["inspection"]["headers"]
+
+
+async def test_inspect_upload_not_found(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_inspect_upload(
+        hass,
+        conn,
+        {"id": 141, "type": "splitsmart/inspect_upload", "upload_id": "does-not-exist"},
+    )
+
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "not_found"
+
+
+async def test_inspect_upload_permission_denied(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u_stranger")
+
+    await _handle_inspect_upload(
+        hass,
+        conn,
+        {"id": 142, "type": "splitsmart/inspect_upload", "upload_id": "anything"},
+    )
+
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "permission_denied"

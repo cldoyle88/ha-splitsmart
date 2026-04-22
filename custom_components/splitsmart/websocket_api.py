@@ -1,6 +1,6 @@
 """Splitsmart websocket API.
 
-Three commands (M2):
+M2 commands:
 
 - ``splitsmart/get_config``: one-shot. Returns participants (with active
   flag), home currency, categories, named splits, current user id.
@@ -9,6 +9,19 @@ Three commands (M2):
   filters.
 - ``splitsmart/list_expenses/subscribe``: long-lived subscription. Initial
   snapshot then delta events on every coordinator write.
+
+M3 commands:
+
+- ``splitsmart/list_staging``: one-shot. Returns the caller's materialised
+  staging rows plus the tombstones that affect them. Rejects requests
+  scoped to another user — staging is private to the uploader (SPEC §7).
+- ``splitsmart/list_staging/subscribe``: long-lived subscription scoped to
+  the caller's staging.
+- ``splitsmart/list_presets``: one-shot. Static preset registry dump.
+- ``splitsmart/save_mapping``: one-shot. Persists a user-authored column
+  mapping under its file-origin hash.
+- ``splitsmart/inspect_upload``: one-shot. Re-runs inspect on a previously
+  uploaded file, returning its ``FileInspection`` payload.
 
 Every response includes ``version: 1`` so the contract can evolve without
 silently breaking older cards. Non-participant callers get ``permission_denied``.
@@ -54,6 +67,24 @@ def _resolve_entry(hass: HomeAssistant) -> tuple[Any, SplitsmartCoordinator] | N
             continue
         if isinstance(value, dict) and "coordinator" in value:
             return value["entry"], value["coordinator"]
+    return None
+
+
+def _resolve_storage(hass: HomeAssistant) -> Any | None:
+    """Return the storage handle for the single configured Splitsmart entry.
+
+    Separate from _resolve_entry because most M2 commands don't need storage
+    (they read only from the coordinator projection). M3 save_mapping and
+    inspect_upload do — they write to / read from disk.
+    """
+    store = hass.data.get(DOMAIN)
+    if not store:
+        return None
+    for key, value in store.items():
+        if key.startswith("_"):
+            continue
+        if isinstance(value, dict) and "storage" in value:
+            return value["storage"]
     return None
 
 
@@ -292,6 +323,239 @@ async def _handle_subscribe(hass: HomeAssistant, connection: Any, msg: dict[str,
     connection.subscriptions[msg_id] = unsubscribe
 
 
+# --------------------------------------------------------------------- M3 handlers
+
+
+def _staging_tombstones_for_user(
+    tombstones: list[dict[str, Any]], user_id: str
+) -> list[dict[str, Any]]:
+    """Staging tombstones (both promote and discard) whose previous_snapshot
+    was uploaded by ``user_id``. The review UI needs both so it can show
+    what disappeared from the queue and why."""
+    out: list[dict[str, Any]] = []
+    for tb in tombstones:
+        if tb.get("target_type") != "staging":
+            continue
+        snapshot = tb.get("previous_snapshot") or {}
+        if snapshot.get("uploaded_by") == user_id:
+            out.append(tb)
+    return out
+
+
+async def _handle_list_staging(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, coordinator = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    # user_id defaults to the caller. An explicit user_id != caller means
+    # the client is asking for another user's staging — SPEC §7 forbids it.
+    target_user_id: str = msg.get("user_id") or caller_id
+    if target_user_id != caller_id:
+        _permission_denied(connection, msg["id"])
+        return
+
+    data = coordinator.data
+    rows = data.staging_by_user.get(caller_id, []) if data is not None else []
+    tombstones = (
+        _staging_tombstones_for_user(data.tombstones, caller_id) if data is not None else []
+    )
+
+    connection.send_result(
+        msg["id"],
+        {
+            "version": API_VERSION,
+            "rows": rows,
+            "tombstones": tombstones,
+            "total": len(rows),
+        },
+    )
+
+
+async def _handle_list_staging_subscribe(
+    hass: HomeAssistant, connection: Any, msg: dict[str, Any]
+) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, coordinator = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    msg_id = msg["id"]
+
+    def _snapshot() -> dict[str, dict[str, Any]]:
+        data = coordinator.data
+        if data is None:
+            return {}
+        return {r["id"]: r for r in data.staging_by_user.get(caller_id, [])}
+
+    prev_rows = _snapshot()
+
+    connection.send_result(msg_id)
+    connection.send_message(
+        {
+            "id": msg_id,
+            "type": "event",
+            "event": {
+                "version": API_VERSION,
+                "kind": "init",
+                "rows": list(prev_rows.values()),
+            },
+        }
+    )
+
+    @callback
+    def _on_update() -> None:
+        nonlocal prev_rows
+        curr_rows = _snapshot()
+
+        added: list[dict[str, Any]] = []
+        updated: list[dict[str, Any]] = []
+        deleted: list[str] = []
+
+        for rid, row in curr_rows.items():
+            if rid not in prev_rows:
+                added.append(row)
+            elif prev_rows[rid] != row:
+                updated.append(row)
+        for rid in prev_rows:
+            if rid not in curr_rows:
+                deleted.append(rid)
+
+        prev_rows = curr_rows
+
+        if not added and not updated and not deleted:
+            return
+
+        connection.send_message(
+            {
+                "id": msg_id,
+                "type": "event",
+                "event": {
+                    "version": API_VERSION,
+                    "kind": "delta",
+                    "added": added,
+                    "updated": updated,
+                    "deleted": deleted,
+                },
+            }
+        )
+
+    unsubscribe = coordinator.async_add_listener(_on_update)
+    connection.subscriptions[msg_id] = unsubscribe
+
+
+async def _handle_list_presets(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, _ = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    from .importer.presets import PRESETS
+
+    connection.send_result(
+        msg["id"],
+        {
+            "version": API_VERSION,
+            "presets": [{"name": p.name, "confidence": p.confidence} for p in PRESETS],
+        },
+    )
+
+
+async def _handle_save_mapping(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, _ = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    from .importer.mapping import save_mapping
+
+    storage = _resolve_storage(hass)
+    await save_mapping(storage, msg["file_origin_hash"], msg["mapping"])
+
+    connection.send_result(
+        msg["id"],
+        {
+            "version": API_VERSION,
+            "file_origin_hash": msg["file_origin_hash"],
+            "saved": True,
+        },
+    )
+
+
+async def _handle_inspect_upload(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, _ = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    from .importer import inspect_file
+
+    storage = _resolve_storage(hass)
+    upload_id: str = msg["upload_id"]
+
+    # Re-use the same resolution logic as the import_file service handler.
+    uploads_dir = storage.uploads_dir
+    path = None
+    if uploads_dir.exists():
+        for candidate in uploads_dir.iterdir():
+            if candidate.stem == upload_id and candidate.is_file():
+                path = candidate
+                break
+    if path is None:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            f"Upload '{upload_id}' not found under /config/splitsmart/uploads/.",
+        )
+        return
+
+    try:
+        inspection = await inspect_file(path, storage=storage)
+    except Exception as err:
+        # Surface structured error to the caller; the only surprise here would
+        # be a filesystem/encoding failure we haven't otherwise enumerated.
+        connection.send_error(msg["id"], "inspect_failed", str(err))
+        return
+
+    connection.send_result(
+        msg["id"],
+        {
+            "version": API_VERSION,
+            "inspection": inspection,
+        },
+    )
+
+
 # --------------------------------------------------------------------- registered handlers
 
 
@@ -343,6 +607,85 @@ async def handle_subscribe(
     await _handle_subscribe(hass, connection, msg)
 
 
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/list_staging",
+        vol.Optional("user_id"): str,
+    }
+)
+@websocket_api.async_response
+async def handle_list_staging(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the caller's staging rows + targeted tombstones."""
+    await _handle_list_staging(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/list_staging/subscribe",
+    }
+)
+@websocket_api.async_response
+async def handle_list_staging_subscribe(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Subscribe to the caller's staging-row deltas."""
+    await _handle_list_staging_subscribe(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/list_presets",
+    }
+)
+@websocket_api.async_response
+async def handle_list_presets(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the static preset registry."""
+    await _handle_list_presets(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/save_mapping",
+        vol.Required("file_origin_hash"): str,
+        vol.Required("mapping"): dict,
+    }
+)
+@websocket_api.async_response
+async def handle_save_mapping(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Persist a mapping under its file-origin hash."""
+    await _handle_save_mapping(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/inspect_upload",
+        vol.Required("upload_id"): str,
+    }
+)
+@websocket_api.async_response
+async def handle_inspect_upload(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Re-inspect a previously uploaded file."""
+    await _handle_inspect_upload(hass, connection, msg)
+
+
 # --------------------------------------------------------------------- registration
 
 
@@ -355,5 +698,11 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, handle_get_config)
     websocket_api.async_register_command(hass, handle_list_expenses)
     websocket_api.async_register_command(hass, handle_subscribe)
+    # M3
+    websocket_api.async_register_command(hass, handle_list_staging)
+    websocket_api.async_register_command(hass, handle_list_staging_subscribe)
+    websocket_api.async_register_command(hass, handle_list_presets)
+    websocket_api.async_register_command(hass, handle_save_mapping)
+    websocket_api.async_register_command(hass, handle_inspect_upload)
 
     hass.data[DOMAIN][flag] = True

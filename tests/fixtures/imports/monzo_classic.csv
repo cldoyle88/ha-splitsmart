@@ -1,0 +1,11 @@
+Transaction ID,Date,Time,Type,Name,Emoji,Category,Amount,Currency,Local amount,Local currency,Notes and #tags,Address,Receipt,Description,Category split,Money Out,Money In
+tx_0000000000001,15/04/2026,09:12:33,Card payment,Waitrose,🛒,Groceries,-47.83,GBP,-47.83,GBP,Weekly shop,"Islington, London N1",,WAITROSE ISLINGTON N1,,47.83,
+tx_0000000000002,15/04/2026,12:45:11,Card payment,Pret a Manger,🥪,Eating out,-8.20,GBP,-8.20,GBP,,,"Kings Cross",,PRET A MANGER KX,,8.20,
+tx_0000000000003,15/04/2026,18:30:00,Card payment,Waitrose,🛒,Groceries,-47.83,GBP,-47.83,GBP,Second trip,"Islington, London N1",,WAITROSE ISLINGTON N1 15/04,,47.83,
+tx_0000000000004,16/04/2026,07:02:19,Card payment,TFL Travel,🚇,Transport,-2.80,GBP,-2.80,GBP,,,"Angel Station",,TFL TRAVEL 16/04,,2.80,
+tx_0000000000005,16/04/2026,08:15:45,Card payment,TFL Travel,🚇,Transport,-2.80,GBP,-2.80,GBP,,,"Kings Cross Station",,TFL TRAVEL 16/04,,2.80,
+tx_0000000000006,17/04/2026,10:00:00,Bank transfer,Acme Ltd Salary,💼,Income,2450.00,GBP,2450.00,GBP,April salary,,,SALARY APR 2026,,,2450.00
+tx_0000000000007,17/04/2026,19:42:55,Card payment,Deliveroo,🍕,Eating out,-32.50,GBP,-32.50,GBP,Friday dinner,,,DELIVEROO,,32.50,
+tx_0000000000008,18/04/2026,11:30:22,Card payment,Netflix,🎬,Subscriptions,-15.99,GBP,-15.99,GBP,,,,*NETFLIX.COM,,15.99,
+tx_0000000000009,18/04/2026,14:20:10,Monzo-to-Monzo,Flatmate Split,💸,General,-20.00,GBP,-20.00,GBP,Rent half,,,TRANSFER,,20.00,
+tx_0000000000010,19/04/2026,20:05:00,Card payment,Tesco Metro,🛒,Groceries,-18.45,GBP,-18.45,GBP,,,"Upper Street, London",,TESCO METRO 2026-04-19,,18.45,

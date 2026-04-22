@@ -1,0 +1,11 @@
+Date,Counter Party,Reference,Type,Amount (GBP),Balance (GBP),Spending Category,Notes
+15/04/2026,Waitrose,CARD PAYMENT,DEBIT,-47.83,1452.17,Groceries,
+15/04/2026,EE Wireless,DIRECT DEBIT,DEBIT,-35.00,1417.17,Bills,April phone
+16/04/2026,Thames Water,DIRECT DEBIT,DEBIT,-22.50,1394.67,Bills,
+16/04/2026,Gym Membership,DIRECT DEBIT,DEBIT,-40.00,1354.67,Wellbeing,
+17/04/2026,Landlord Rent,STANDING ORDER,DEBIT,-900.00,454.67,Housing,April rent
+17/04/2026,Acme Ltd,FASTER PAYMENT,CREDIT,2450.00,2904.67,Income,April salary
+18/04/2026,Amazon,CARD PAYMENT,DEBIT,-19.99,2884.68,Shopping,
+18/04/2026,John Lewis,CARD PAYMENT,DEBIT,-125.00,2759.68,Shopping,Cushions
+19/04/2026,Waitrose,CARD PAYMENT,DEBIT,-53.10,2706.58,Groceries,
+19/04/2026,Shell Petrol,CARD PAYMENT,DEBIT,-62.40,2644.18,Transport,

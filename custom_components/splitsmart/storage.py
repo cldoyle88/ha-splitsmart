@@ -16,11 +16,13 @@ from ulid import ULID
 from .const import (
     EXPENSES_FILE,
     ID_PREFIX_TOMBSTONE,
+    MAPPINGS_FILE,
     RECEIPTS_DIR,
     SETTLEMENTS_FILE,
     SHARED_DIR,
     STAGING_DIR,
     TOMBSTONES_FILE,
+    UPLOADS_DIR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,6 +77,7 @@ class SplitsmartStorage:
             self._root / STAGING_DIR,
             self._root / RECEIPTS_DIR,
             self._root / RECEIPTS_DIR / "incoming",
+            self._root / UPLOADS_DIR,
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -96,6 +99,18 @@ class SplitsmartStorage:
 
     def staging_path(self, user_id: str) -> pathlib.Path:
         return self._root / STAGING_DIR / f"{user_id}.jsonl"
+
+    @property
+    def uploads_dir(self) -> pathlib.Path:
+        return self._root / UPLOADS_DIR
+
+    def upload_path(self, upload_id: str, extension: str) -> pathlib.Path:
+        ext = extension.lstrip(".").lower()
+        return self._root / UPLOADS_DIR / f"{upload_id}.{ext}"
+
+    @property
+    def mappings_path(self) -> pathlib.Path:
+        return self._root / MAPPINGS_FILE
 
     # --------------------------------------------------------- generic JSONL
 

@@ -30,9 +30,11 @@ STORAGE_SUBDIR = "splitsmart"
 SHARED_DIR = "shared"
 STAGING_DIR = "staging"
 RECEIPTS_DIR = "receipts"
+UPLOADS_DIR = "uploads"
 EXPENSES_FILE = "expenses.jsonl"
 SETTLEMENTS_FILE = "settlements.jsonl"
 TOMBSTONES_FILE = "tombstones.jsonl"
+MAPPINGS_FILE = "mappings.jsonl"
 
 # JSONL record id prefixes
 ID_PREFIX_EXPENSE = "ex"

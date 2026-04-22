@@ -790,36 +790,40 @@ All configurable per-participant in options flow. Notification payloads include 
 
 Each milestone is a PR target — tested, documented, self-contained.
 
-### M1: Data plane (no UI)
+The M1 completion report reshuffled milestones M2–M5: the Lovelace card landed first (so the data plane immediately got a driveable UI), the import pipeline moved earlier (bulk loading unlocks real-world usage), and FX / recurring / staging / rules slot in afterwards. Telegram OCR and polish keep their original positions. The current plan of record is:
+
+### M1: Data plane (no UI) — ✓ Complete (2026-04-20)
 - Component skeleton, config flow, storage layer, coordinator, ledger calculator, core services (`add_expense`, `add_settlement`, `edit_*`, `delete_*`), sensors.
 - Drivable from Developer Tools → Services.
-- Tests: storage, ledger, services.
+- Tests: storage, ledger, coordinator, services, sensors.
 
-### M2: Frontend scaffold
-- Custom card build pipeline (Rollup + Lit + TS).
-- Bundle served from integration, auto-registered as Lovelace resource.
-- Home view + Ledger view + Add expense view.
-- Tests: card renders, service calls wired.
+### M2: Lovelace custom card — ✓ Complete (2026-04-22)
+- Build pipeline (Rollup + Lit 3 + TypeScript); single ES module bundle served from the integration.
+- Websocket API: `get_config`, `list_expenses`, `list_expenses/subscribe` (init + delta events).
+- Auto-registered Lovelace resource (storage mode) + INFO-logged snippet for YAML mode.
+- Self-hosted DM Sans / DM Mono fonts (no external CDN calls).
+- Views: Home (balance strip + quick actions), Ledger (filter chips, row cards), Add expense (full multi-category allocator, per-category splits), Settle up (pairwise-debt suggestion), expense + settlement detail sheets.
+- Tests: ~109 jsdom component tests in vitest, ~108 Python tests, Pi QA checklist in `tests/MANUAL_QA_M2.md`.
 
-### M3: FX and recurring
+### M3: Import pipeline
+- CSV / XLSX / OFX / QIF parsers.
+- Preset mappings (Monzo, Starling, Revolut, Splitwise).
+- Column-mapping UI in the card.
+- Multiset duplicate detection.
+- Tests: each parser with fixture files, dedup matrix.
+
+### M4: FX and recurring
 - Frankfurter client with historical lookups, cache, daily refresh task.
 - Recurring bills engine with daily materialisation.
 - FX health binary sensor.
 - Tests: FX mock HTTP, recurring edge cases (month-end, 29 Feb).
 
-### M4: Staging + rules
+### M5: Staging + rules
 - Staging storage + services (`promote_staging`, `skip_staging`).
 - Rules engine with YAML file watcher.
 - Staging view in card with one-tap actions and bulk mode.
 - Rule editor view.
 - Tests: rules engine, staging transitions.
-
-### M5: Import pipeline
-- CSV / XLSX / OFX / QIF parsers.
-- Preset mappings (Monzo, Starling, Revolut, Splitwise).
-- Column-mapping UI.
-- Multiset duplicate detection.
-- Tests: each parser with fixture files, dedup matrix.
 
 ### M6: Telegram OCR
 - Telegram event subscriber.

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Pi QA outcome (2026-04-22)
+
+M2 passed the 17-section Pi QA checklist (`tests/MANUAL_QA_M2.md`). Two intermittent symptoms observed once and not reproduced after a fresh session were filed as M7-polish issues rather than blockers:
+
+- [#3](https://github.com/cldoyle88/ha-splitsmart/issues/3) – two-client edit race producing a "not found" toast when a stale tab submits after a delta has retired the id.
+- [#4](https://github.com/cldoyle88/ha-splitsmart/issues/4) – multi-category Save button intermittently disabled. Float-drift root cause was investigated and ruled out (the 0.01 tolerance passes the Tesco case exactly). Awaits a reliable repro.
+
+Related fixes shipped during QA (already squashed into M2):
+
+- Removed `return_response: true` from `hass.callService` options — HA 2026.x rejects the older target-arg shape and the card doesn't consume the id (delta subscription delivers new records).
+- `LastExpenseSensor` now explicitly sets `state_class = None` and `device_class = None` so HA 2026.x's strict non-numeric-state validation doesn't reject its string value.
+
 ### Added – M2 Lovelace Custom Card (2026-04-21)
 
 **Build pipeline**

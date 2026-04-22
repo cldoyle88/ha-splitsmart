@@ -89,7 +89,7 @@ _DATE_FORMATS = (
 )
 
 
-def _parse_date(value: str, date_format: str) -> str:
+def parse_date(value: str, date_format: str = "auto") -> str:
     """Parse a date cell and return ISO-8601 YYYY-MM-DD.
 
     `date_format` may be a strptime pattern or the literal "auto", in
@@ -116,7 +116,7 @@ def _parse_date(value: str, date_format: str) -> str:
     raise ValueError(f"could not parse date {value!r}")
 
 
-def _coerce_amount(value: str) -> float:
+def coerce_amount(value: str) -> float:
     """Parse a money string like "1,234.56" or "-£47.83" into a float."""
     cleaned = value.strip().replace(",", "").replace("£", "").replace("$", "").replace("€", "")
     # Some banks wrap negatives in parens: "(47.83)" => -47.83
@@ -136,7 +136,7 @@ def apply_mapping(
     date_col = mapping["date"]
     desc_col = mapping["description"]
 
-    date = _parse_date(row[date_col], mapping.get("date_format", "auto"))
+    date = parse_date(row[date_col], mapping.get("date_format", "auto"))
     description = row[desc_col].strip()
 
     # Amount: either a single signed column, or a debit/credit pair.
@@ -144,15 +144,15 @@ def apply_mapping(
     debit_col = mapping.get("debit")
     credit_col = mapping.get("credit")
     if amount_col:
-        raw_amount = _coerce_amount(row[amount_col])
+        raw_amount = coerce_amount(row[amount_col])
         if mapping.get("amount_sign", "expense_negative") == "expense_negative":
             # Expenses stored as negative in the file → flip to positive.
             amount = -raw_amount
         else:
             amount = raw_amount
     elif debit_col and credit_col:
-        debit = _coerce_amount(row[debit_col]) if row.get(debit_col, "").strip() else 0.0
-        credit = _coerce_amount(row[credit_col]) if row.get(credit_col, "").strip() else 0.0
+        debit = coerce_amount(row[debit_col]) if row.get(debit_col, "").strip() else 0.0
+        credit = coerce_amount(row[credit_col]) if row.get(credit_col, "").strip() else 0.0
         # Debit is the expense amount; credit is income.
         amount = debit - credit
     else:

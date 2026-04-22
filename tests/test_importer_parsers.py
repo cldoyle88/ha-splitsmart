@@ -8,7 +8,12 @@ from typing import Any
 import openpyxl
 import pytest
 
-from custom_components.splitsmart.importer import csv_parser, xlsx_parser
+from custom_components.splitsmart.importer import (
+    csv_parser,
+    ofx_parser,
+    qif_parser,
+    xlsx_parser,
+)
 from custom_components.splitsmart.importer.presets import (
     MONZO_MAPPING,
     REVOLUT_MAPPING,
@@ -275,3 +280,97 @@ async def test_xlsx_parser_tolerates_short_rows(tmp_path: pathlib.Path) -> None:
     outcome = await xlsx_parser.parse(path, MONZO_MAPPING)
     assert len(outcome.errors) == 0
     assert outcome.rows[0]["currency"] == "GBP"
+
+
+# --------------------------------------------------------- OFX
+
+
+@pytest.mark.asyncio
+async def test_ofx_inspect_carries_no_preset_or_headers() -> None:
+    inspection = await ofx_parser.inspect(FIXTURES / "sample.ofx")
+    assert inspection["preset"] is None
+    assert inspection["headers"] == []
+    assert inspection["sample_rows"] == []
+    assert inspection["file_origin_hash"].startswith("sha1:")
+
+
+@pytest.mark.asyncio
+async def test_ofx_parse_extracts_all_transactions() -> None:
+    outcome = await ofx_parser.parse(FIXTURES / "sample.ofx")
+    assert outcome.row_count_raw == 5
+    assert len(outcome.errors) == 0
+
+    rows_by_name = {r["description"]: r for r in outcome.rows}
+    # Expense rows: amount is flipped to positive.
+    assert rows_by_name["WAITROSE"]["amount"] == 47.83
+    assert rows_by_name["WAITROSE"]["date"] == "2026-04-15"
+    assert rows_by_name["WAITROSE"]["currency"] == "GBP"
+    # Income row: stays negative after sign flip.
+    assert rows_by_name["ACME LTD"]["amount"] == -2450.00
+    # Memo pulls through as notes.
+    assert rows_by_name["WAITROSE"]["notes"] == "Weekly shop"
+
+
+# --------------------------------------------------------- QIF
+
+
+@pytest.mark.asyncio
+async def test_qif_inspect_carries_no_preset_or_headers() -> None:
+    inspection = await qif_parser.inspect(FIXTURES / "sample.qif")
+    assert inspection["preset"] is None
+    assert inspection["headers"] == []
+    assert inspection["file_origin_hash"].startswith("sha1:")
+
+
+@pytest.mark.asyncio
+async def test_qif_parse_extracts_ten_transactions() -> None:
+    outcome = await qif_parser.parse(FIXTURES / "sample.qif")
+    assert outcome.row_count_raw == 10
+    assert len(outcome.errors) == 0
+
+    first = outcome.rows[0]
+    assert first["date"] == "2026-04-15"
+    assert first["description"] == "Waitrose"
+    assert first["amount"] == 47.83
+    assert first["category_hint"] == "Groceries"
+    assert first["notes"] == "Weekly shop"
+    assert first["currency"] == "GBP"  # QIF has no currency; defaults to GBP
+
+    salary = next(r for r in outcome.rows if r["description"] == "Acme Ltd")
+    assert salary["amount"] == -2450.00
+
+
+@pytest.mark.asyncio
+async def test_qif_parse_handles_trailing_record_without_caret(
+    tmp_path: pathlib.Path,
+) -> None:
+    """QIF files in the wild sometimes omit the terminal ^ on the last record."""
+    path = tmp_path / "untrailed.qif"
+    path.write_text(
+        "!Type:Bank\n"
+        "D15/04/2026\n"
+        "T-47.83\n"
+        "PWaitrose\n"
+        "^\n"
+        "D16/04/2026\n"
+        "T-2.80\n"
+        "PTFL\n",  # no terminal ^
+        encoding="utf-8",
+    )
+    outcome = await qif_parser.parse(path)
+    assert outcome.row_count_raw == 2
+    assert outcome.rows[1]["description"] == "TFL"
+
+
+@pytest.mark.asyncio
+async def test_qif_parse_skips_type_directive_and_blank_lines(
+    tmp_path: pathlib.Path,
+) -> None:
+    path = tmp_path / "directives.qif"
+    path.write_text(
+        "!Type:CCard\n\nD15/04/2026\nT-10.00\nPTest\n^\n\n",
+        encoding="utf-8",
+    )
+    outcome = await qif_parser.parse(path)
+    assert outcome.row_count_raw == 1
+    assert outcome.rows[0]["amount"] == 10.00

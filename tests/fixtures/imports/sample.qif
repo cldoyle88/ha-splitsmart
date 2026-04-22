@@ -1,0 +1,55 @@
+!Type:Bank
+D15/04/2026
+T-47.83
+PWaitrose
+MWeekly shop
+LGroceries
+^
+D16/04/2026
+T-2.80
+PTFL Travel
+LTransport
+^
+D16/04/2026
+T-15.99
+PNetflix
+LSubscriptions
+^
+D17/04/2026
+T2450.00
+PAcme Ltd
+MApril salary
+LIncome
+^
+D17/04/2026
+T-900.00
+PLandlord
+MApril rent
+LHousing
+^
+D18/04/2026
+T-22.50
+PThames Water
+LBills
+^
+D18/04/2026
+T-35.00
+PEE Wireless
+MPhone bill
+LBills
+^
+D19/04/2026
+T-18.45
+PTesco Metro
+LGroceries
+^
+D19/04/2026
+T-62.40
+PShell
+LTransport
+^
+D20/04/2026
+T-8.20
+PPret a Manger
+LEating out
+^

@@ -1,1 +1,1 @@
-# Splitsmart importer sub-package — parsers land in M5.
+# Splitsmart importer sub-package. Parsers + dedup land incrementally in M3.

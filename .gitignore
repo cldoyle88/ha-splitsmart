@@ -14,8 +14,12 @@ build/
 node_modules/
 frontend/dist/
 
-# Frontend build output (committed separately or via release)
+# Frontend build output — not committed; shipped via GitHub Releases per M2 plan §2.
 custom_components/splitsmart/frontend/splitsmart-card.js
+custom_components/splitsmart/frontend/splitsmart-card.js.map
+
+# Claude / local agent config
+.claude/
 
 # Home Assistant
 custom_components/*/

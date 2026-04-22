@@ -40,3 +40,42 @@ jobs:
       # pyproject.toml addopts skips them by default (Windows dev flow).
       - name: Run tests
         run: pytest -v --tb=short -m ""
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm test
+
+      - name: Build (production)
+        run: npm run build:prod
+
+      # Enforce the 150 KB minified bundle-size budget from M2_PLAN.md §2.
+      - name: Assert bundle size under 150 KB
+        run: |
+          size=$(wc -c < ../custom_components/splitsmart/frontend/splitsmart-card.js)
+          echo "Bundle size: $size bytes"
+          if [ "$size" -gt 153600 ]; then
+            echo "Bundle exceeds 150 KB budget"
+            exit 1
+          fi

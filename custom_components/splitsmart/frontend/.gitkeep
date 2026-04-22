@@ -1,0 +1,5 @@
+# This directory is the target of the Rollup build.
+# The built bundle (splitsmart-card.js) is gitignored and shipped via
+# GitHub Releases per M2_PLAN.md §2. This .gitkeep preserves the directory
+# so the integration's async_register_static_paths target exists at
+# clone time, even before the first frontend build has run.

@@ -17,6 +17,7 @@ from .const import (
     DOMAIN,
 )
 from .coordinator import SplitsmartCoordinator
+from .frontend_registration import async_register_frontend
 from .storage import SplitsmartStorage, validate_root
 
 if TYPE_CHECKING:
@@ -73,6 +74,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         from .services import async_register_services
 
         async_register_services(hass)
+
+    # Register websocket commands once per HA instance.
+    from .websocket_api import async_register_websocket_commands
+
+    async_register_websocket_commands(hass)
+
+    # Serve the bundle + fonts and auto-register the Lovelace resource.
+    await async_register_frontend(hass)
 
     # Invalidate coordinator when options change
     async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:

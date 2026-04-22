@@ -137,6 +137,12 @@ class BalanceSensor(_SplitsmartSensor):
         balance: Decimal = self.coordinator.data.balances.get(self._user_id, Decimal("0"))
         return float(balance.quantize(Decimal("0.01")))
 
+    # NOTE: per_partner is unused by the M2 card (computePairwise in
+    # frontend/src/util/balances.ts is the source of truth for Settle Up
+    # suggestions). Retained for possible M7 use (dashboard entity cards,
+    # voice assistants). If the two calculations drift, fix it here —
+    # never prefer the sensor attribute over the frontend computation
+    # during M2-M6.
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         if self.coordinator.data is None:
@@ -254,6 +260,9 @@ class SpendingTotalMonthSensor(_SplitsmartSensor):
 
 class LastExpenseSensor(_SplitsmartSensor):
     """Description of the most recent shared expense."""
+
+    _attr_state_class = None
+    _attr_device_class = None
 
     def __init__(
         self,

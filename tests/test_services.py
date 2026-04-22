@@ -7,6 +7,7 @@ event loop or hass fixture needed.
 from __future__ import annotations
 
 import pathlib
+import shutil
 from decimal import Decimal
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
@@ -24,6 +25,7 @@ from custom_components.splitsmart.services import (
     _handle_delete_settlement,
     _handle_edit_expense,
     _handle_edit_settlement,
+    _handle_import_file,
     _handle_promote_staging,
     _handle_skip_staging,
 )
@@ -656,3 +658,261 @@ async def test_promote_override_description_and_date_take_effect(
     expense = next(e for e in coordinator.data.expenses if e["id"] == result["expense_id"])
     assert expense["description"] == "Waitrose (corrected)"
     assert expense["date"] == "2026-04-16"
+
+
+# ------------------------------------------------------------------ import_file
+
+
+FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures" / "imports"
+
+
+async def _stage_upload(
+    storage: SplitsmartStorage, fixture_name: str, upload_id: str | None = None
+) -> str:
+    """Copy a test fixture into /config/splitsmart/uploads/ and return the
+    upload_id the service expects. Short-circuits the HTTP upload endpoint
+    (step 9) so import_file is testable end-to-end at step 6c."""
+    import uuid
+
+    src = FIXTURES_DIR / fixture_name
+    ext = src.suffix.lstrip(".").lower()
+    if upload_id is None:
+        upload_id = str(uuid.uuid4())
+    dest = storage.upload_path(upload_id, ext)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(src, dest)
+    return upload_id
+
+
+async def test_import_file_monzo_happy_path(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    upload_id = await _stage_upload(storage, "monzo_classic.csv")
+    hass = _make_hass(storage, coordinator)
+
+    result = await _handle_import_file(_make_call(hass, {"upload_id": upload_id}))
+
+    assert result["imported"] == 10
+    assert result["skipped_as_duplicate"] == 0
+    assert result["parse_errors"] == 0
+    assert result["preset"] == "Monzo"
+    assert result["blocked_foreign_currency"] == 0
+
+    # Staging rows landed with the right metadata.
+    rows = coordinator.data.staging_by_user["u1"]
+    assert len(rows) == 10
+    first = rows[0]
+    assert first["uploaded_by"] == "u1"
+    assert first["source"] == "csv"
+    assert first["source_preset"] == "Monzo"
+    assert first["source_ref_upload_id"] == upload_id
+    assert first["source_ref"].endswith(".csv")
+    assert first["rule_action"] == "pending"
+    assert first["dedup_hash"].startswith("sha256:")
+
+
+async def test_import_file_reimport_same_file_is_fully_deduped(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    upload_id_1 = await _stage_upload(storage, "monzo_classic.csv")
+    hass = _make_hass(storage, coordinator)
+
+    first = await _handle_import_file(_make_call(hass, {"upload_id": upload_id_1}))
+    assert first["imported"] == 10
+
+    # Second upload of the same content → fresh upload_id but same dedup hashes.
+    upload_id_2 = await _stage_upload(storage, "monzo_classic.csv")
+    second = await _handle_import_file(_make_call(hass, {"upload_id": upload_id_2}))
+    assert second["imported"] == 0
+    assert second["skipped_as_duplicate"] == 10
+
+    # Staging unchanged.
+    assert len(coordinator.data.staging_by_user["u1"]) == 10
+
+
+async def test_import_file_dedup_against_shared_ledger(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """After promoting a staging row, re-importing the same file skips that
+    row via the shared-ledger side of dedup — the promote tombstone is
+    intentionally not counted."""
+    upload_id_1 = await _stage_upload(storage, "monzo_classic.csv")
+    hass = _make_hass(storage, coordinator)
+
+    first = await _handle_import_file(_make_call(hass, {"upload_id": upload_id_1}))
+    assert first["imported"] == 10
+
+    # Promote the first staging row.
+    staging_rows = list(coordinator.data.staging_by_user["u1"])
+    first_row = staging_rows[0]
+    await _handle_promote_staging(
+        _make_call(
+            hass,
+            {
+                "staging_id": first_row["id"],
+                "paid_by": "u1",
+                "categories": [
+                    {
+                        "name": "Groceries",
+                        "home_amount": first_row["amount"],
+                        "split": {
+                            "method": "equal",
+                            "shares": [
+                                {"user_id": "u1", "value": 50},
+                                {"user_id": "u2", "value": 50},
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+    )
+    # After promote: 9 staging + 1 shared.
+    assert len(coordinator.data.staging_by_user["u1"]) == 9
+    assert len(coordinator.data.expenses) == 1
+
+    # Re-import the same file → all 10 accounted for, 0 imports.
+    upload_id_2 = await _stage_upload(storage, "monzo_classic.csv")
+    second = await _handle_import_file(_make_call(hass, {"upload_id": upload_id_2}))
+    assert second["imported"] == 0
+    assert second["skipped_as_duplicate"] == 10
+
+
+async def test_import_file_dedup_against_skip_tombstone(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """After skipping a staging row, re-importing skips that row via the
+    discard-tombstone bucket — skip-is-sticky across re-imports."""
+    upload_id_1 = await _stage_upload(storage, "monzo_classic.csv")
+    hass = _make_hass(storage, coordinator)
+
+    await _handle_import_file(_make_call(hass, {"upload_id": upload_id_1}))
+    skip_target = coordinator.data.staging_by_user["u1"][0]
+    await _handle_skip_staging(_make_call(hass, {"staging_id": skip_target["id"]}))
+
+    # Re-import → skipped row must not resurrect.
+    upload_id_2 = await _stage_upload(storage, "monzo_classic.csv")
+    second = await _handle_import_file(_make_call(hass, {"upload_id": upload_id_2}))
+    assert second["imported"] == 0
+    assert second["skipped_as_duplicate"] == 10
+    # The skipped row is still gone from staging.
+    ids = {r["id"] for r in coordinator.data.staging_by_user["u1"]}
+    assert skip_target["id"] not in ids
+
+
+async def test_import_file_revolut_blocked_foreign_currency_counted(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """Revolut fixture has EUR + USD rows. They stage fine but the response
+    reports how many are FX-blocked (per O4)."""
+    upload_id = await _stage_upload(storage, "revolut_account.csv")
+    hass = _make_hass(storage, coordinator)
+
+    result = await _handle_import_file(_make_call(hass, {"upload_id": upload_id}))
+    assert result["preset"] == "Revolut"
+    assert result["imported"] == 10
+    # Fixture has 4 EUR + 1 USD rows = 5 FX-blocked.
+    assert result["blocked_foreign_currency"] == 5
+
+
+async def test_import_file_ofx_needs_no_mapping(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    upload_id = await _stage_upload(storage, "sample.ofx")
+    hass = _make_hass(storage, coordinator)
+
+    result = await _handle_import_file(_make_call(hass, {"upload_id": upload_id}))
+    assert result["imported"] == 5
+    assert result["preset"] is None  # OFX has fixed schema, no preset
+    rows = coordinator.data.staging_by_user["u1"]
+    assert rows[0]["source"] == "ofx"
+
+
+async def test_import_file_malformed_row_does_not_abort(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    upload_id = await _stage_upload(storage, "malformed.csv")
+    hass = _make_hass(storage, coordinator)
+
+    # malformed.csv is a Monzo-shaped header (detects Monzo preset) with one
+    # bad row of 3. Parse errors surface in the response but good rows land.
+    result = await _handle_import_file(_make_call(hass, {"upload_id": upload_id}))
+    assert result["imported"] == 2
+    assert result["parse_errors"] == 1
+    assert "first_error_hint" in result
+
+
+async def test_import_file_no_preset_no_mapping_raises_mapping_required(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """A CSV whose headers don't match any preset and no saved mapping
+    exists surfaces ImporterError(mapping_required) as a
+    ServiceValidationError so Developer Tools callers can see the code."""
+    upload_id = await _stage_upload(storage, "generic_no_preset.csv")
+    hass = _make_hass(storage, coordinator)
+
+    from homeassistant.exceptions import ServiceValidationError
+
+    with pytest.raises(ServiceValidationError, match="mapping_required"):
+        await _handle_import_file(_make_call(hass, {"upload_id": upload_id}))
+
+
+async def test_import_file_with_explicit_mapping_persists_it(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """Supplying mapping + remember_mapping=True should write to
+    mappings.jsonl so next month's re-import of the same-shape file
+    resolves via saved-by-hash without a second mapping round trip."""
+    upload_id = await _stage_upload(storage, "generic_no_preset.csv")
+    hass = _make_hass(storage, coordinator)
+
+    mapping: dict[str, Any] = {
+        "date": "Posted",
+        "description": "Merchant",
+        "amount": "Spent",
+        "debit": None,
+        "credit": None,
+        "currency": None,
+        "currency_default": "GBP",
+        "amount_sign": "expense_positive",
+        "date_format": "auto",
+        "notes_append": ["Note"],
+        "category_hint": None,
+    }
+    result = await _handle_import_file(
+        _make_call(hass, {"upload_id": upload_id, "mapping": mapping})
+    )
+    assert result["imported"] == 5
+
+    # The mapping is now persisted — a re-upload without mapping resolves.
+    from custom_components.splitsmart.importer.mapping import load_saved_mappings
+
+    saved = await load_saved_mappings(storage)
+    assert len(saved) == 1
+    assert next(iter(saved.values())) == mapping
+
+
+async def test_import_file_unknown_upload_id_raises(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    hass = _make_hass(storage, coordinator)
+    from homeassistant.exceptions import ServiceValidationError
+
+    with pytest.raises(ServiceValidationError, match="not found"):
+        await _handle_import_file(_make_call(hass, {"upload_id": "does-not-exist"}))
+
+
+async def test_import_file_writes_to_caller_not_another_user(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """Upload scope is per-caller — rows land in the caller's staging file,
+    not shared with other participants."""
+    upload_id = await _stage_upload(storage, "monzo_classic.csv")
+    hass = _make_hass(storage, coordinator)
+
+    # Call as u2.
+    await _handle_import_file(_make_call(hass, {"upload_id": upload_id}, user_id="u2"))
+
+    # u2's staging has the rows; u1's is empty.
+    assert len(coordinator.data.staging_by_user["u2"]) == 10
+    assert coordinator.data.staging_by_user["u1"] == []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
 from typing import Any
 
 import voluptuous as vol
@@ -18,6 +19,7 @@ from .const import (
     SERVICE_DELETE_SETTLEMENT,
     SERVICE_EDIT_EXPENSE,
     SERVICE_EDIT_SETTLEMENT,
+    SERVICE_IMPORT_FILE,
     SERVICE_PROMOTE_STAGING,
     SERVICE_SKIP_STAGING,
     SOURCE_STAGING,
@@ -31,6 +33,11 @@ from .const import (
     TOMBSTONE_EDIT,
     TOMBSTONE_PROMOTE,
 )
+from .importer import parse_file
+from .importer.dedup import partition_by_dedup
+from .importer.mapping import save_mapping
+from .importer.normalise import dedup_hash
+from .importer.types import ImporterError, Mapping
 from .ledger import (
     SplitsmartValidationError,
     build_expense_record,
@@ -38,6 +45,7 @@ from .ledger import (
     validate_expense_record,
     validate_settlement_record,
 )
+from .storage import new_id
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -148,6 +156,18 @@ SKIP_STAGING_SCHEMA = vol.Schema(
     {
         vol.Required("staging_id"): cv.string,
         vol.Optional("reason"): vol.Any(None, cv.string),
+    }
+)
+
+IMPORT_FILE_SCHEMA = vol.Schema(
+    {
+        vol.Required("upload_id"): cv.string,
+        # Mapping shape is validated by the importer's apply_mapping, not here —
+        # voluptuous would have to mirror types.Mapping and drift as that evolves.
+        vol.Optional("mapping"): vol.Any(None, dict),
+        # rule_set is accepted but ignored in M3 — rules land in M5.
+        vol.Optional("rule_set"): vol.Any(None, cv.string, dict),
+        vol.Optional("remember_mapping", default=True): bool,
     }
 )
 
@@ -571,6 +591,145 @@ async def _handle_skip_staging(call: ServiceCall) -> dict[str, Any]:
     return {"staging_id": staging_id}
 
 
+# ---- M3 import_file ----
+
+
+def _collect_discard_tombstones_for_user(
+    tombstones: list[dict[str, Any]], user_id: str
+) -> list[dict[str, Any]]:
+    """Filter the shared tombstones log to staging-discard tombstones that
+    target rows this user uploaded. Per M3_PLAN §4, promote tombstones are
+    NOT included: the resulting shared expense is already counted in
+    dedup's existing_shared bucket, and double-counting would block
+    legitimate re-occurrences."""
+    out: list[dict[str, Any]] = []
+    for tb in tombstones:
+        if tb.get("target_type") != TARGET_STAGING:
+            continue
+        if tb.get("operation") != TOMBSTONE_DISCARD:
+            continue
+        snapshot = tb.get("previous_snapshot") or {}
+        if snapshot.get("uploaded_by") == user_id:
+            out.append(tb)
+    return out
+
+
+def _find_upload_path(storage: Any, upload_id: str) -> Any:
+    """Resolve upload_id to the file on disk; raises if no match.
+    Searches for any file ``<upload_id>.<ext>`` under uploads/ — the
+    endpoint stores files by uuid4 and we don't require the caller to
+    remember the extension."""
+    uploads_dir = storage.uploads_dir
+    if uploads_dir.exists():
+        for candidate in uploads_dir.iterdir():
+            if candidate.stem == upload_id and candidate.is_file():
+                return candidate
+    raise ServiceValidationError(
+        f"Upload '{upload_id}' not found under /config/splitsmart/uploads/. "
+        "POST to /api/splitsmart/upload first, or check the upload hasn't been "
+        "purged by the daily cleanup task."
+    )
+
+
+async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
+    from .importer import inspect_file
+
+    data = IMPORT_FILE_SCHEMA(dict(call.data))
+    storage, coordinator, participants, home_currency, _ = _get_entry_data(call.hass)
+    caller = _resolve_caller(call, participants)
+
+    upload_id: str = data["upload_id"]
+    path = _find_upload_path(storage, upload_id)
+    user_mapping: Mapping | None = data.get("mapping")
+
+    # One inspection pass: preset match for the source_preset field, origin
+    # hash for mapping persistence. inspect is cheap (header row only).
+    # Fixed-schema parsers (OFX/QIF) return empty headers and preset=None.
+    inspection = await inspect_file(path, storage=storage)
+    preset_name = inspection.get("preset")
+
+    # Parse through the facade; the cascade handles
+    # explicit user_mapping > preset > saved-by-hash > raise(mapping_required).
+    try:
+        outcome = await parse_file(path, user_mapping=user_mapping, storage=storage)
+    except ImporterError as err:
+        # Surface the structured code so Developer Tools users can see the
+        # inspection payload (attached to err.inspection) and fix the mapping.
+        raise ServiceValidationError(f"{err.code}: {err}") from err
+
+    # Dedup against caller's private staging + the shared ledger +
+    # caller's discard tombstones. Promote tombstones are intentionally
+    # not included — the resulting shared expense covers them.
+    existing_staging = coordinator.data.staging_by_user.get(caller, [])
+    existing_shared = coordinator.data.expenses
+    discard_tombstones = _collect_discard_tombstones_for_user(coordinator.data.tombstones, caller)
+    to_import, to_skip = partition_by_dedup(
+        outcome.rows,
+        existing_staging=existing_staging,
+        existing_shared=existing_shared,
+        skipped_staging_tombstones=discard_tombstones,
+    )
+
+    uploaded_at = datetime.now(tz=UTC).astimezone().isoformat()
+    staging_path = storage.staging_path(caller)
+    blocked_foreign_currency = 0
+    extension = path.suffix.lstrip(".").lower()
+
+    for row in to_import:
+        currency = row["currency"]
+        record: dict[str, Any] = {
+            "id": new_id("st"),
+            "uploaded_by": caller,
+            "uploaded_at": uploaded_at,
+            "source": extension,
+            "source_ref": path.name,
+            "source_ref_upload_id": upload_id,
+            "source_preset": preset_name,
+            "date": row["date"],
+            "description": row["description"],
+            "amount": round(float(row["amount"]), 2),
+            "currency": currency,
+            "rule_action": "pending",
+            "rule_id": None,
+            "category_hint": row.get("category_hint"),
+            "dedup_hash": dedup_hash(
+                date=row["date"],
+                amount=float(row["amount"]),
+                currency=currency,
+                description=row["description"],
+            ),
+            "receipt_path": None,
+            "notes": row.get("notes"),
+        }
+        await storage.append(staging_path, record)
+        if currency != home_currency:
+            blocked_foreign_currency += 1
+
+    # Persist the user's mapping for next-month frictionless re-import. Only
+    # when the caller supplied an explicit mapping — preset matches don't
+    # need persistence, and saved-by-hash matches are already persisted.
+    # Inspection headers are empty for OFX/QIF so the save is skipped there.
+    if user_mapping is not None and data.get("remember_mapping", True) and inspection["headers"]:
+        await save_mapping(storage, inspection["file_origin_hash"], user_mapping)
+
+    # One coordinator refresh, scoped to this user's staging. Skip the
+    # refresh entirely if nothing imported (pure-dedup run, or all-errors run).
+    if to_import:
+        await coordinator.async_note_write(staging_user_id=caller)
+
+    response: dict[str, Any] = {
+        "upload_id": upload_id,
+        "imported": len(to_import),
+        "skipped_as_duplicate": len(to_skip),
+        "parse_errors": len(outcome.errors),
+        "blocked_foreign_currency": blocked_foreign_currency,
+        "preset": preset_name,
+    }
+    if outcome.errors:
+        response["first_error_hint"] = outcome.errors[0].message
+    return response
+
+
 # ------------------------------------------------------------------ registration
 
 
@@ -632,6 +791,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         schema=None,
         supports_response=SupportsResponse.OPTIONAL,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_IMPORT_FILE,
+        _handle_import_file,
+        schema=None,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     _LOGGER.debug("Splitsmart services registered")
 
 
@@ -646,6 +812,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_DELETE_SETTLEMENT,
         SERVICE_PROMOTE_STAGING,
         SERVICE_SKIP_STAGING,
+        SERVICE_IMPORT_FILE,
     ):
         hass.services.async_remove(DOMAIN, service)
     _LOGGER.debug("Splitsmart services deregistered")

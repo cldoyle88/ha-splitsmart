@@ -336,3 +336,44 @@ skip_staging:
       required: false
       selector:
         text:
+
+import_file:
+  name: Import statement file
+  description: >
+    Parse a previously uploaded statement file into the caller's staging inbox.
+    POST the file to /api/splitsmart/upload first to get an upload_id. Rows
+    already seen (multiset-dedup against staging, shared ledger, and skipped
+    tombstones) are counted as duplicates and not re-imported. Foreign-currency
+    rows land in staging but cannot be promoted until M4's FX support.
+  fields:
+    upload_id:
+      name: Upload ID
+      description: UUID returned by POST /api/splitsmart/upload.
+      required: true
+      example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+      selector:
+        text:
+    mapping:
+      name: Mapping
+      description: >
+        Explicit column mapping. Required when no preset matches the file and
+        no mapping has been saved previously for this file shape. Same fields
+        as the wizard produces — see importer/types.py:Mapping.
+      required: false
+      selector:
+        object:
+    rule_set:
+      name: Rule set
+      description: Reserved for M5. Ignored in M3; every row lands rule_action=pending.
+      required: false
+      selector:
+        text:
+    remember_mapping:
+      name: Remember mapping
+      description: >
+        Save the supplied mapping under the file's origin hash so next month's
+        re-import matches automatically. Has no effect when no explicit mapping
+        was supplied. Default true.
+      required: false
+      selector:
+        boolean:

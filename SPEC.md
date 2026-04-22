@@ -149,6 +149,8 @@ All data lives under `/config/splitsmart/`. Never under `/config/www/` — those
   "uploaded_at": "2026-04-19T14:03:00+01:00",
   "source": "csv|xlsx|ofx|qif|telegram|manual",
   "source_ref": "statement_2026-04.csv",
+  "source_ref_upload_id": "a1b2c3d4-e5f6-...",
+  "source_preset": "Monzo",
   "date": "2026-04-15",
   "description": "WAITROSE ISLINGTON N1",
   "amount": 47.83,
@@ -161,6 +163,10 @@ All data lives under `/config/splitsmart/`. Never under `/config/www/` — those
   "notes": null
 }
 ```
+
+`source_ref_upload_id` links a staging row to the uploaded file it came from (the uuid filename under `/config/splitsmart/uploads/`). The daily cleanup task uses this reference to decide which uploads are still live. `null` for rows that did not originate from a file upload (e.g. `source=telegram` or `source=manual`).
+
+`source_preset` records which import preset matched at parse time, or `null` when the row was imported via an explicit / saved mapping. Useful for audit and for one-click re-import UX.
 
 **`shared/expenses.jsonl`** — canonical household ledger:
 

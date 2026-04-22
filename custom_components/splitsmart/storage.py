@@ -184,8 +184,16 @@ class SplitsmartStorage:
         operation: str,
         previous_snapshot: dict[str, Any],
         reason: str | None = None,
+        replacement_id: str | None = None,
     ) -> dict[str, Any]:
-        """Build, append, and return a tombstone record."""
+        """Build, append, and return a tombstone record.
+
+        ``replacement_id`` is written when the tombstone represents a morph
+        rather than an end-of-life — notably ``operation="promote"`` on a
+        staging row, where ``replacement_id`` is the new shared expense's
+        id. Kept optional so expense/settlement edit/delete tombstones
+        don't carry a ``None`` field.
+        """
         record: dict[str, Any] = {
             "id": new_id(ID_PREFIX_TOMBSTONE),
             "created_at": datetime.now(tz=UTC).astimezone().isoformat(),
@@ -196,5 +204,7 @@ class SplitsmartStorage:
             "previous_snapshot": previous_snapshot,
             "reason": reason,
         }
+        if replacement_id is not None:
+            record["replacement_id"] = replacement_id
         await self.append(self.tombstones_path, record)
         return record

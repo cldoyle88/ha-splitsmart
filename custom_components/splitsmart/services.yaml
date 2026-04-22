@@ -250,3 +250,89 @@ delete_settlement:
       required: false
       selector:
         text:
+
+promote_staging:
+  name: Promote staging row
+  description: >
+    Move a private staging row to the shared ledger as a new expense.
+    Only the uploader can promote their own staging rows. Foreign-currency
+    rows are blocked until M4; the row stays staged for later retry.
+  fields:
+    staging_id:
+      name: Staging ID
+      description: The st_ id of the staging row to promote.
+      required: true
+      example: "st_01J9XABCDEFG"
+      selector:
+        text:
+    paid_by:
+      name: Paid by
+      description: >
+        HA user ID of the person who actually paid. Often differs from the
+        uploader — e.g. the statement was imported by one partner but a
+        given row was paid on a shared card by the other.
+      required: true
+      example: "user_abc123"
+      selector:
+        text:
+    categories:
+      name: Categories
+      description: >
+        Category allocations for the promoted expense. Same shape as
+        add_expense. The row's amount is inherited from the staging row;
+        the allocations must sum to it.
+      required: true
+      selector:
+        object:
+    notes:
+      name: Notes
+      description: Optional note stored on the shared expense.
+      required: false
+      selector:
+        text:
+          multiline: true
+    receipt_path:
+      name: Receipt path
+      description: Optional receipt path; defaults to the staging row's value.
+      required: false
+      selector:
+        text:
+    override_description:
+      name: Override description
+      description: Rename the merchant at promotion without editing the staging row.
+      required: false
+      selector:
+        text:
+    override_date:
+      name: Override date
+      description: Shift the transaction date at promotion without editing the staging row.
+      required: false
+      selector:
+        date:
+    reason:
+      name: Reason
+      description: Optional reason stored with the promote tombstone for audit.
+      required: false
+      selector:
+        text:
+
+skip_staging:
+  name: Skip staging row
+  description: >
+    Mark a staging row as discarded — the row stays private, is never promoted,
+    and re-imports of the same file will not resurrect it. Only the uploader
+    can skip their own staging rows.
+  fields:
+    staging_id:
+      name: Staging ID
+      description: The st_ id of the staging row to skip.
+      required: true
+      example: "st_01J9XABCDEFG"
+      selector:
+        text:
+    reason:
+      name: Reason
+      description: Optional reason stored with the discard tombstone for audit.
+      required: false
+      selector:
+        text:

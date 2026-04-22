@@ -81,6 +81,10 @@ SERVICE_EDIT_EXPENSE = "edit_expense"
 SERVICE_EDIT_SETTLEMENT = "edit_settlement"
 SERVICE_DELETE_EXPENSE = "delete_expense"
 SERVICE_DELETE_SETTLEMENT = "delete_settlement"
+# M3 services
+SERVICE_IMPORT_FILE = "import_file"
+SERVICE_PROMOTE_STAGING = "promote_staging"
+SERVICE_SKIP_STAGING = "skip_staging"
 
 # Coordinator
 COORDINATOR_UPDATE_INTERVAL_MINUTES = 5

@@ -284,6 +284,21 @@ async def test_append_tombstone_no_reason(tmp_path: pathlib.Path):
     assert tb["reason"] is None
 
 
+def test_tombstone_operation_constants_are_disjoint():
+    # M3 adds TOMBSTONE_PROMOTE; guard against accidental value collision with
+    # the existing operations now so dedup's operation filter stays honest.
+    from custom_components.splitsmart.const import (
+        TOMBSTONE_DELETE,
+        TOMBSTONE_DISCARD,
+        TOMBSTONE_EDIT,
+        TOMBSTONE_PROMOTE,
+    )
+
+    assert TOMBSTONE_PROMOTE == "promote"
+    values = {TOMBSTONE_EDIT, TOMBSTONE_DELETE, TOMBSTONE_DISCARD, TOMBSTONE_PROMOTE}
+    assert len(values) == 4
+
+
 # ------------------------------------------------------------------ JSON integrity
 
 

@@ -64,6 +64,8 @@ SOURCES = {SOURCE_MANUAL, SOURCE_STAGING, SOURCE_TELEGRAM, SOURCE_RECURRING}
 TOMBSTONE_EDIT = "edit"
 TOMBSTONE_DELETE = "delete"
 TOMBSTONE_DISCARD = "discard"
+# M3: staging row morphed into a shared expense. Tombstone carries replacement_id.
+TOMBSTONE_PROMOTE = "promote"
 
 # Tombstone target types
 TARGET_EXPENSE = "expense"

@@ -74,6 +74,9 @@
       },
       "last_expense": {
         "name": "Last expense"
+      },
+      "pending_count": {
+        "name": "Pending count"
       }
     }
   }

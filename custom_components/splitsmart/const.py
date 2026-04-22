@@ -99,3 +99,5 @@ SENSOR_BALANCE = "balance"
 SENSOR_SPENDING_MONTH = "spending_month"
 SENSOR_SPENDING_TOTAL_MONTH = "spending_total_month"
 SENSOR_LAST_EXPENSE = "last_expense"
+# M3
+SENSOR_PENDING_COUNT = "pending_count"

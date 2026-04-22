@@ -19,6 +19,7 @@ from custom_components.splitsmart.ledger import build_expense_record
 from custom_components.splitsmart.sensor import (
     BalanceSensor,
     LastExpenseSensor,
+    PendingCountSensor,
     SpendingMonthSensor,
     SpendingTotalMonthSensor,
 )
@@ -360,6 +361,156 @@ def test_entity_names_and_device_info(entry: MagicMock):
         assert (DOMAIN, "test_entry") in info["identifiers"]
         assert info["name"] == "Splitsmart"
         assert info["model"] == "Household finance"
+
+
+# ------------------------------------------------------------------ pending count (M3)
+
+
+def _staging_row(
+    *,
+    user_id: str,
+    amount: float = 4.50,
+    currency: str = "GBP",
+    rule_action: str = "pending",
+    date: str = "2026-04-15",
+    uploaded_at: str = "2026-04-22T10:00:00+01:00",
+) -> dict[str, Any]:
+    """Minimal staging record matching what import_file writes."""
+    return {
+        "id": f"st_{uploaded_at}_{amount}",
+        "uploaded_by": user_id,
+        "uploaded_at": uploaded_at,
+        "source": "csv",
+        "date": date,
+        "description": "Coffee",
+        "amount": amount,
+        "currency": currency,
+        "rule_action": rule_action,
+    }
+
+
+async def test_pending_count_zero_when_no_staging(
+    coordinator: SplitsmartCoordinator, entry: MagicMock
+):
+    sensor = PendingCountSensor(coordinator, entry, "u1", "Chris", "GBP")
+    assert sensor.native_value == 0
+    attrs = sensor.extra_state_attributes
+    assert attrs["promotable_count"] == 0
+    assert attrs["blocked_foreign_currency_count"] == 0
+    assert attrs["last_imported_at"] is None
+    assert attrs["oldest_pending_date"] is None
+
+
+async def test_pending_count_includes_pending_rows_only(
+    storage: SplitsmartStorage,
+    coordinator: SplitsmartCoordinator,
+    entry: MagicMock,
+):
+    # Append 3 rows for u1: 2 pending, 1 already-rule-promoted (rule_action
+    # set by rules engine in M5 — excluded from the count today).
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1", amount=5.50))
+    await storage.append(
+        storage.staging_path("u1"),
+        _staging_row(user_id="u1", amount=6.50, rule_action="always_split"),
+    )
+    coordinator.data = await coordinator._async_update_data()
+
+    sensor = PendingCountSensor(coordinator, entry, "u1", "Chris", "GBP")
+    assert sensor.native_value == 2
+
+
+async def test_pending_count_partition_invariant(
+    storage: SplitsmartStorage,
+    coordinator: SplitsmartCoordinator,
+    entry: MagicMock,
+):
+    """Core O4 guarantee: state == promotable_count + blocked_foreign_currency_count."""
+    # 3 GBP rows (promotable) + 2 EUR rows (blocked) + 1 USD row (blocked) = state 6.
+    for amt in (4.50, 5.50, 6.50):
+        await storage.append(
+            storage.staging_path("u1"),
+            _staging_row(user_id="u1", amount=amt, currency="GBP"),
+        )
+    for amt in (7.50, 8.50):
+        await storage.append(
+            storage.staging_path("u1"),
+            _staging_row(user_id="u1", amount=amt, currency="EUR"),
+        )
+    await storage.append(
+        storage.staging_path("u1"),
+        _staging_row(user_id="u1", amount=9.50, currency="USD"),
+    )
+    coordinator.data = await coordinator._async_update_data()
+
+    sensor = PendingCountSensor(coordinator, entry, "u1", "Chris", "GBP")
+    attrs = sensor.extra_state_attributes
+    assert sensor.native_value == 6
+    assert attrs["promotable_count"] == 3
+    assert attrs["blocked_foreign_currency_count"] == 3
+    assert (
+        sensor.native_value == attrs["promotable_count"] + attrs["blocked_foreign_currency_count"]
+    )
+
+
+async def test_pending_count_is_per_user_scoped(
+    storage: SplitsmartStorage,
+    coordinator: SplitsmartCoordinator,
+    entry: MagicMock,
+):
+    """u1's sensor must not see u2's staging rows and vice versa."""
+    for _ in range(4):
+        await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    for _ in range(2):
+        await storage.append(storage.staging_path("u2"), _staging_row(user_id="u2"))
+    coordinator.data = await coordinator._async_update_data()
+
+    chris = PendingCountSensor(coordinator, entry, "u1", "Chris", "GBP")
+    slav = PendingCountSensor(coordinator, entry, "u2", "Slav", "GBP")
+    assert chris.native_value == 4
+    assert slav.native_value == 2
+
+
+async def test_pending_count_attribute_metadata(
+    storage: SplitsmartStorage,
+    coordinator: SplitsmartCoordinator,
+    entry: MagicMock,
+):
+    """last_imported_at picks up the newest uploaded_at across the user's
+    pending rows; oldest_pending_date is the smallest date field."""
+    await storage.append(
+        storage.staging_path("u1"),
+        _staging_row(
+            user_id="u1",
+            date="2026-04-10",
+            uploaded_at="2026-04-20T09:00:00+01:00",
+        ),
+    )
+    await storage.append(
+        storage.staging_path("u1"),
+        _staging_row(
+            user_id="u1",
+            amount=5.00,
+            date="2026-04-18",
+            uploaded_at="2026-04-22T14:30:00+01:00",
+        ),
+    )
+    coordinator.data = await coordinator._async_update_data()
+
+    sensor = PendingCountSensor(coordinator, entry, "u1", "Chris", "GBP")
+    attrs = sensor.extra_state_attributes
+    assert attrs["last_imported_at"] == "2026-04-22T14:30:00+01:00"
+    assert attrs["oldest_pending_date"] == "2026-04-10"
+    assert attrs["home_currency"] == "GBP"
+
+
+def test_pending_count_entity_name_and_unique_id(entry: MagicMock):
+    coord = MagicMock()
+    sensor = PendingCountSensor(coord, entry, "abc123", "Chris", "GBP")
+    assert sensor.name == "Pending count Chris"
+    # Unique id keyed on user_id (stable across display-name renames).
+    assert "abc123" in sensor._attr_unique_id
+    assert "pending_count" in sensor._attr_unique_id
 
 
 # config_flow tests require Linux/phcc (ha_integration — pytest -m ha_integration)

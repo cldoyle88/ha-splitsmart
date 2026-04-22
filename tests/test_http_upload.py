@@ -26,11 +26,6 @@ from custom_components.splitsmart.storage import SplitsmartStorage
 
 FIXTURES_DIR = pathlib.Path(__file__).parent / "fixtures" / "imports"
 
-# These tests spin up a real aiohttp TCP server on 127.0.0.1. pytest-socket
-# (activated by pytest-homeassistant-custom-component in CI) blocks socket
-# creation by default — allow loopback so TestServer/TestClient can bind.
-pytestmark = [pytest.mark.allow_hosts(["127.0.0.1"])]
-
 
 # ------------------------------------------------------------------ fixtures
 
@@ -61,7 +56,9 @@ async def coordinator(storage: SplitsmartStorage) -> SplitsmartCoordinator:
 
 @pytest.fixture
 async def http_client(
-    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+    storage: SplitsmartStorage,
+    coordinator: SplitsmartCoordinator,
+    socket_enabled: None,
 ) -> AsyncGenerator[tuple[TestClient, SplitsmartStorage], None]:
     entry = MagicMock()
     entry.data = {CONF_PARTICIPANTS: ["u1", "u2"]}
@@ -223,6 +220,7 @@ async def test_upload_rejects_non_participant(
 
 async def test_upload_404_when_integration_not_loaded(
     tmp_path: pathlib.Path,
+    socket_enabled: None,
 ) -> None:
     """If hass.data doesn't have a Splitsmart entry, the view returns 404
     instead of a cryptic KeyError."""

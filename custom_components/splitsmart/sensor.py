@@ -373,6 +373,9 @@ class PendingCountSensor(_SplitsmartSensor):
         oldest_pending_date = min(dates) if dates else None
 
         return {
+            # Exposed so the frontend can pick the current user's sensor from
+            # hass.states without relying on slugged-display-name matching.
+            "user_id": self._user_id,
             "last_imported_at": last_imported_at,
             "home_currency": self._home_currency,
             "oldest_pending_date": oldest_pending_date,

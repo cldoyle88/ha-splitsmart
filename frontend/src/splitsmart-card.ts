@@ -190,6 +190,35 @@ export class SplitsmartCard extends LitElement {
     return resolveLocale(this.hass?.locale?.language);
   }
 
+  /**
+   * Resolve the current user's pending-count sensor from hass.states.
+   *
+   * The sensor's unique_id encodes the HA user_id but its entity_id is
+   * slugged from the display name, which we can't reliably re-derive in
+   * the frontend. Instead, the sensor exposes `user_id` as an attribute
+   * (see sensor.PendingCountSensor); we scan hass.states for the one
+   * matching the current user.
+   *
+   * Returns `null` when the integration hasn't booted yet or the sensor
+   * isn't in hass.states. The placeholder tile falls back to its static
+   * caption in that case.
+   */
+  private _pendingCountForCurrentUser(): number | null {
+    if (!this.hass || !this._splitsmartConfig) return null;
+    const myId = this._splitsmartConfig.current_user_id;
+    for (const [entityId, state] of Object.entries(this.hass.states)) {
+      if (!entityId.startsWith('sensor.splitsmart_pending_count_')) continue;
+      const attrUserId = (state as { attributes?: Record<string, unknown> }).attributes
+        ?.user_id;
+      if (attrUserId !== myId) continue;
+      const raw = (state as { state?: string }).state;
+      if (raw === undefined || raw === 'unavailable' || raw === 'unknown') return null;
+      const parsed = Number.parseInt(raw, 10);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
   private _renderView() {
     if (this._loadError) {
       return html`
@@ -304,6 +333,7 @@ export class SplitsmartCard extends LitElement {
             .balances=${balances}
             .pairwise=${pairwise}
             .locale=${this._locale()}
+            .pendingCount=${this._pendingCountForCurrentUser()}
           ></ss-home-view>
         `;
     }

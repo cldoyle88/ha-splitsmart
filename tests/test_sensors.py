@@ -499,6 +499,7 @@ async def test_pending_count_attribute_metadata(
 
     sensor = PendingCountSensor(coordinator, entry, "u1", "Chris", "GBP")
     attrs = sensor.extra_state_attributes
+    assert attrs["user_id"] == "u1"
     assert attrs["last_imported_at"] == "2026-04-22T14:30:00+01:00"
     assert attrs["oldest_pending_date"] == "2026-04-10"
     assert attrs["home_currency"] == "GBP"

@@ -84,6 +84,16 @@ def _make_entry(
     return entry
 
 
+def _make_mock_fx_client(storage: SplitsmartStorage) -> MagicMock:
+    from unittest.mock import AsyncMock
+
+    from custom_components.splitsmart.fx import FxClient, FxUnavailableError
+
+    mock = MagicMock(spec=FxClient)
+    mock.get_rate = AsyncMock(side_effect=FxUnavailableError("mock: network unavailable"))
+    return mock
+
+
 def _make_hass(
     storage: SplitsmartStorage | None,
     coordinator: SplitsmartCoordinator | None,
@@ -97,6 +107,7 @@ def _make_hass(
                 "test_entry": {
                     "storage": storage,
                     "coordinator": coordinator,
+                    "fx": _make_mock_fx_client(storage),
                     "entry": entry,
                 },
             },

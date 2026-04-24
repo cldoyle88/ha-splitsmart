@@ -21,6 +21,7 @@ from .const import (
 )
 from .coordinator import SplitsmartCoordinator
 from .frontend_registration import async_register_frontend
+from .fx import FxClient
 from .storage import SplitsmartStorage, validate_root
 
 if TYPE_CHECKING:
@@ -63,10 +64,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     except Exception as err:
         raise ConfigEntryNotReady(f"Failed initial ledger load: {err}") from err
 
+    fx_client = FxClient(hass, storage)
+
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = {
         "storage": storage,
         "coordinator": coordinator,
+        "fx": fx_client,
         "entry": entry,
     }
 

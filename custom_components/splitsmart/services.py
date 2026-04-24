@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import voluptuous as vol
@@ -33,6 +34,7 @@ from .const import (
     TOMBSTONE_EDIT,
     TOMBSTONE_PROMOTE,
 )
+from .fx import FxClient, FxUnavailableError, FxUnsupportedCurrencyError
 from .importer import parse_file
 from .importer.dedup import partition_by_dedup
 from .importer.mapping import save_mapping
@@ -91,6 +93,8 @@ ADD_EXPENSE_SCHEMA = vol.Schema(
         vol.Optional("receipt_path"): vol.Any(None, cv.string),
         vol.Optional("source", default="manual"): vol.In(list(SOURCES)),
         vol.Optional("staging_id"): vol.Any(None, cv.string),
+        vol.Optional("fx_rate"): vol.All(vol.Coerce(float), vol.Range(min=0.000001)),
+        vol.Optional("fx_date"): cv.date,
     }
 )
 
@@ -102,6 +106,8 @@ ADD_SETTLEMENT_SCHEMA = vol.Schema(
         vol.Required("amount"): vol.All(vol.Coerce(float), vol.Range(min=0.01)),
         vol.Optional("currency"): vol.All(cv.string, vol.Length(min=3, max=3)),
         vol.Optional("notes"): vol.Any(None, cv.string),
+        vol.Optional("fx_rate"): vol.All(vol.Coerce(float), vol.Range(min=0.000001)),
+        vol.Optional("fx_date"): cv.date,
     }
 )
 
@@ -201,14 +207,66 @@ def _resolve_caller(call: ServiceCall, participants: list[str]) -> str:
     return caller
 
 
-def _guard_currency(currency: str, home_currency: str) -> None:
-    """Reject foreign-currency entries until FX support lands in M4."""
-    if currency != home_currency:
+def _get_fx_client(hass: HomeAssistant) -> FxClient:
+    domain_data = hass.data.get(DOMAIN, {})
+    if not domain_data:
+        raise ServiceValidationError("Splitsmart integration is not loaded")
+    entry_data = next(iter(domain_data.values()))
+    return entry_data["fx"]
+
+
+async def _resolve_fx(
+    fx_client: FxClient,
+    *,
+    currency: str,
+    home_currency: str,
+    date: str,
+    explicit_rate: float | None,
+    explicit_fx_date: str | None,
+) -> tuple[Decimal, str]:
+    """Return (rate, fx_date_iso) for the write.
+
+    Raises ServiceValidationError with a stable message on any FX failure so
+    callers (UI, automations, Developer Tools) can surface it directly.
+    """
+    if currency == home_currency and explicit_rate is not None:
         raise ServiceValidationError(
-            f"Foreign-currency entries ('{currency}') are not yet supported. "
-            "Multi-currency support arrives in M4. Use the home currency "
-            f"'{home_currency}' for now."
+            "fx_rate provided for a home-currency entry. "
+            "Either remove fx_rate or change the currency."
         )
+
+    if currency == home_currency:
+        return Decimal("1"), date
+
+    if explicit_rate is not None:
+        fx_date_str = explicit_fx_date.isoformat() if explicit_fx_date else date
+        return Decimal(str(explicit_rate)), fx_date_str
+
+    # Live lookup via cache → Frankfurter
+    import datetime as _dt
+
+    try:
+        result = await fx_client.get_rate(
+            date=_dt.date.fromisoformat(date),
+            from_currency=currency,
+            to_currency=home_currency,
+        )
+    except FxUnsupportedCurrencyError:
+        raise ServiceValidationError(
+            f"Currency '{currency}' is not supported by the FX provider. "
+            "Provide fx_rate explicitly or choose a different currency."
+        )
+    except Exception:
+        _LOGGER.error(
+            "FX lookup failed for %s→%s on %s", currency, home_currency, date
+        )
+        raise ServiceValidationError(
+            f"FX rate for {date} {currency}→{home_currency} is not cached and "
+            "Frankfurter is unreachable. Try again when connectivity returns, "
+            "or provide fx_rate explicitly."
+        )
+
+    return result.rate, result.fx_date.isoformat()
 
 
 def _find_live_staging_row(coordinator: Any, staging_id: str, caller: str) -> dict[str, Any]:
@@ -244,9 +302,17 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
     caller = _resolve_caller(call, participants)
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     record = build_expense_record(
         date=date_str,
         description=data["description"],
@@ -260,6 +326,8 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
         staging_id=data.get("staging_id"),
         receipt_path=data.get("receipt_path"),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -284,9 +352,17 @@ async def _handle_add_settlement(call: ServiceCall) -> dict[str, Any]:
     caller = _resolve_caller(call, participants)
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     record = build_settlement_record(
         date=date_str,
         from_user=data["from_user"],
@@ -296,6 +372,8 @@ async def _handle_add_settlement(call: ServiceCall) -> dict[str, Any]:
         home_currency=home_currency,
         notes=data.get("notes"),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -331,9 +409,17 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
         raise ServiceValidationError(f"Expense '{target_id}' not found")
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     new_record = build_expense_record(
         date=date_str,
         description=data["description"],
@@ -350,6 +436,8 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
         # having to re-send the receipt path for trivial edits.
         receipt_path=data.get("receipt_path", existing.get("receipt_path")),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -425,9 +513,17 @@ async def _handle_edit_settlement(call: ServiceCall) -> dict[str, Any]:
         raise ServiceValidationError(f"Settlement '{target_id}' not found")
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     new_record = build_settlement_record(
         date=date_str,
         from_user=data["from_user"],
@@ -437,6 +533,8 @@ async def _handle_edit_settlement(call: ServiceCall) -> dict[str, Any]:
         home_currency=home_currency,
         notes=data.get("notes"),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:

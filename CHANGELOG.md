@@ -7,6 +7,110 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added – M4 FX and Recurring Bills (2026-04-24)
+
+**FX client and cache (`fx.py`)**
+- `FxClient(hass, storage)` resolves exchange rates via Frankfurter
+  (`https://api.frankfurter.dev/v1/{date}?from=X&to=Y`). Cache-first:
+  looks up `fx_rates.jsonl` by `(from_currency, to_currency,
+  requested_date)` before hitting the network. Stores `fx_date`
+  separately so weekend re-queries hit the cache without a second
+  network call.
+- 5-second timeout; one automatic retry after a 0.5-second backoff.
+  Uses HA's shared `async_get_clientsession` session.
+- Error taxonomy: `FxUnavailableError` (network/timeout),
+  `FxUnsupportedCurrencyError` (404 from Frankfurter),
+  `FxSanityError` (suspicious-rate sanity guard).
+- Sanity guard: if `abs((today − expense_date).days) ≤ 365` and the
+  resolved rate diverges from today's live rate by more than 50%,
+  `FxSanityError` is raised. Today's-lookup failure silently skips
+  the guard so it can't block a write where the primary lookup
+  succeeded.
+
+**FX on services (`services.py`)**
+- `_resolve_fx()` implements the cascade: same-currency shortcut →
+  explicit `fx_rate` override → live cache/network lookup + sanity
+  guard.
+- `add_expense`, `edit_expense`, `add_settlement`, `edit_settlement`
+  all pass through `_resolve_fx`; `home_amount` is now
+  `amount × fx_rate` rounded to 2 dp.
+- `promote_staging` no longer blocks foreign-currency rows with the
+  M3 placeholder message; it invokes the same FX cascade.
+- `add_expense` and `add_settlement` schemas gain optional `fx_rate`
+  (float, > 0) and `fx_date` (date string) fields for explicit
+  overrides.
+
+**Expense and settlement records (`ledger.py`)**
+- `build_expense_record` and `build_settlement_record` gain `fx_rate`
+  and `fx_date` parameters; both fields are written to the JSONL
+  record. `fx_date` defaults to the expense date when omitted.
+- `recurring_id` field added to expense records (null for non-recurring).
+
+**`binary_sensor.splitsmart_fx_healthy` (`binary_sensor.py`)**
+- `BinarySensorDeviceClass.CONNECTIVITY`, `EntityCategory.DIAGNOSTIC`.
+- `is_on` when the most recent successful Frankfurter fetch is within
+  24 hours of now.
+- `extra_state_attributes`: `{"last_checked": <ISO-8601 or null>}`.
+- Refreshes on coordinator tick (every 5 minutes).
+
+**Storage path helpers (`storage.py`, `const.py`)**
+- `SplitsmartStorage` gains `.fx_rates_path`, `.recurring_yaml_path`,
+  `.recurring_state_path`.
+- `ensure_layout()` touches `fx_rates.jsonl` and
+  `recurring_state.jsonl` on first run; `recurring.yaml` is
+  intentionally user-created.
+
+**Recurring bills (`recurring.py`)**
+- `load_recurring(path, *, participants)` parses `recurring.yaml`
+  with voluptuous. Schedules: `monthly` (day 1–31, clamped for short
+  months), `weekly` (weekday name), `annually` (month + day, clamped
+  for non-leap Feb). Invalid entries are skipped with ERROR; duplicate
+  IDs reject the second entry.
+- `schedule_matches(schedule, date)` and
+  `dates_in_range(schedule, *, floor, ceiling)` are pure helpers.
+- `load_recurring_state` / `append_recurring_state` manage
+  `recurring_state.jsonl` with `rs_`-prefixed IDs and newest-wins
+  semantics per `recurring_id`.
+- `materialise_recurring()` two-belt idempotency: Belt 1 is the state
+  file; Belt 2 scans existing expenses for `(recurring_id, date)`
+  collisions. FX failures skip the date and leave state un-advanced
+  for that entry. Last allocation in each expense absorbs rounding
+  drift so `sum(category.home_amounts) == home_amount` exactly.
+  First materialisation with > 3 due dates logs an INFO backfill
+  advisory.
+
+**Daily 03:00 materialisation (`__init__.py`)**
+- `async_track_time_change(hour=3, minute=0, second=0)` fires
+  `_materialise_daily` on each entry setup. Loads `recurring.yaml`,
+  reads state, reads existing expenses, calls `materialise_recurring`,
+  refreshes the coordinator if new expenses were written.
+
+**`splitsmart.materialise_recurring` service**
+- On-demand trigger for the 03:00 task. Accepts optional
+  `recurring_id` to process a single entry; raises
+  `ServiceValidationError` for unknown IDs. Returns
+  `{materialised, skipped_fx_failure, skipped_duplicate}` via
+  `SupportsResponse.OPTIONAL`.
+
+**Tests (75 new tests; 356 backend total)**
+- FX client (13): cache-first, network miss, timeout, retry, same-ccy
+  shortcut, unsupported-currency 404, JSONL cache write.
+- FX sanity (7): inside-window pass, outside-window block, edge
+  thresholds, today-lookup-failure skips guard.
+- `binary_sensor.splitsmart_fx_healthy` (7): on/off transitions, null
+  last_checked, 24 h boundary.
+- Recurring loader (13): happy paths, missing file, malformed partial
+  load, paid_by not participant, duplicate id, bad day/weekday.
+- Recurring schedule (11): monthly clamping, weekly, annually,
+  dates_in_range multi-year, edge cases.
+- Recurring materialiser (14): one date, 3-month catch-up, state
+  respects, already-current, end-date boundaries, Belt 2
+  idempotency, FX failure, EUR rescaling, float drift, filter_id.
+- Materialise service (5): write, no-yaml, filter_id, unknown id,
+  idempotency.
+
+**Manual QA checklist** — `tests/MANUAL_QA_M4.md` (14 items).
+
 ### Added – M3 Import Pipeline (2026-04-22)
 
 **Parsers + mapping cascade (`custom_components/splitsmart/importer/`)**

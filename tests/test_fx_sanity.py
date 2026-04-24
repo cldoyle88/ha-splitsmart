@@ -187,3 +187,30 @@ async def test_explicit_rate_bypasses_guard(tmp_path):
     )
     assert rate == Decimal("0.85")
     assert fx_date == yesterday
+
+
+@pytest.mark.asyncio
+async def test_resolve_fx_home_currency_with_explicit_rate_raises_exact_message():
+    """fx_rate on a home-currency entry must raise the exact M4 error string.
+
+    Automations in production may pattern-match on this message; it must not
+    change without a breaking-change notice.
+    """
+    expected = (
+        "fx_rate provided for a home-currency entry. "
+        "Either remove fx_rate or change the currency."
+    )
+    mock = MagicMock(spec=FxClient)
+
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await _resolve_fx(
+            mock,
+            currency="GBP",
+            home_currency="GBP",
+            date="2026-04-15",
+            explicit_rate=1.15,
+            explicit_fx_date=None,
+        )
+
+    assert str(exc_info.value) == expected
+    mock.get_rate.assert_not_called()

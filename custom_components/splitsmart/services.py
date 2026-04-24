@@ -21,6 +21,7 @@ from .const import (
     SERVICE_EDIT_EXPENSE,
     SERVICE_EDIT_SETTLEMENT,
     SERVICE_IMPORT_FILE,
+    SERVICE_MATERIALISE_RECURRING,
     SERVICE_PROMOTE_STAGING,
     SERVICE_SKIP_STAGING,
     SOURCE_STAGING,
@@ -871,6 +872,63 @@ async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
     return response
 
 
+# ------------------------------------------------------------------ materialise_recurring
+
+
+MATERIALISE_RECURRING_SCHEMA = vol.Schema(
+    {
+        vol.Optional("recurring_id"): vol.All(str, vol.Length(min=1)),
+    }
+)
+
+
+async def _handle_materialise_recurring(call: ServiceCall) -> dict[str, Any]:
+    """Run recurring materialisation on demand, optionally for a single entry."""
+    from .recurring import load_recurring, load_recurring_state, materialise_recurring
+
+    data = MATERIALISE_RECURRING_SCHEMA(dict(call.data))
+    filter_id: str | None = data.get("recurring_id")
+
+    storage, coordinator, participants, home_currency, known_categories = _get_entry_data(call.hass)
+    fx_client = _get_fx_client(call.hass)
+
+    recurring_entries = load_recurring(
+        storage.recurring_yaml_path,
+        participants=list(participants),
+    )
+
+    if filter_id is not None:
+        ids = {e.id for e in recurring_entries}
+        if filter_id not in ids:
+            raise ServiceValidationError(
+                f"No recurring entry with id '{filter_id}' found in recurring.yaml"
+            )
+
+    state = await load_recurring_state(storage.recurring_state_path)
+    existing_expenses = await storage.read_all(storage.expenses_path)
+
+    result = await materialise_recurring(
+        entries=recurring_entries,
+        state=state,
+        existing_expenses=existing_expenses,
+        fx_client=fx_client,
+        home_currency=home_currency,
+        participants=set(participants),
+        known_categories=known_categories,
+        storage=storage,
+        filter_id=filter_id,
+    )
+
+    if result.materialised:
+        await coordinator.async_refresh()
+
+    return {
+        "materialised": result.materialised,
+        "skipped_fx_failure": result.skipped_fx_failure,
+        "skipped_duplicate": result.skipped_duplicate,
+    }
+
+
 # ------------------------------------------------------------------ registration
 
 
@@ -939,6 +997,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         schema=None,
         supports_response=SupportsResponse.OPTIONAL,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_MATERIALISE_RECURRING,
+        _handle_materialise_recurring,
+        schema=None,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     _LOGGER.debug("Splitsmart services registered")
 
 
@@ -954,6 +1019,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_PROMOTE_STAGING,
         SERVICE_SKIP_STAGING,
         SERVICE_IMPORT_FILE,
+        SERVICE_MATERIALISE_RECURRING,
     ):
         hass.services.async_remove(DOMAIN, service)
     _LOGGER.debug("Splitsmart services deregistered")

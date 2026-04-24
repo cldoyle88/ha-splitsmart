@@ -377,3 +377,21 @@ import_file:
       required: false
       selector:
         boolean:
+
+materialise_recurring:
+  name: Materialise recurring
+  description: >
+    Run recurring bill materialisation immediately, writing any due expense
+    records to the shared ledger. Useful for testing or recovering from a
+    missed 03:00 run. Returns counts of written, skipped-FX, and
+    skipped-duplicate entries.
+  fields:
+    recurring_id:
+      name: Recurring ID
+      description: >
+        If supplied, only materialise the single recurring entry with this id.
+        Omit to process all entries in recurring.yaml.
+      required: false
+      example: "netflix"
+      selector:
+        text:

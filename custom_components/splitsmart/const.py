@@ -89,6 +89,8 @@ SERVICE_DELETE_SETTLEMENT = "delete_settlement"
 SERVICE_IMPORT_FILE = "import_file"
 SERVICE_PROMOTE_STAGING = "promote_staging"
 SERVICE_SKIP_STAGING = "skip_staging"
+# M4 services
+SERVICE_MATERIALISE_RECURRING = "materialise_recurring"
 
 # Coordinator
 COORDINATOR_UPDATE_INTERVAL_MINUTES = 5

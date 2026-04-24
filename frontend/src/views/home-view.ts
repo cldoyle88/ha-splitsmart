@@ -50,6 +50,14 @@ export class SsHomeView extends LitElement {
   @property({ type: String })
   locale = 'en-GB';
 
+  /**
+   * Pending-row count for the current user, read by the root from
+   * sensor.splitsmart_pending_count_<user>. `null` when the sensor
+   * isn't available yet (first paint, integration mid-load).
+   */
+  @property({ attribute: false })
+  pendingCount: number | null = null;
+
   private _navigate(route: string) {
     this.dispatchEvent(
       new CustomEvent('ss-navigate', {
@@ -233,6 +241,7 @@ export class SsHomeView extends LitElement {
           title="Pending review"
           milestone="M5"
           caption="Receipts and imported rows waiting for a split/ignore decision."
+          .pendingCount=${this.pendingCount}
         ></ss-placeholder-tile>
 
         ${this._lastExpenseTile()}

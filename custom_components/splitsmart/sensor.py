@@ -24,6 +24,7 @@ from .const import (
     DOMAIN,
     SENSOR_BALANCE,
     SENSOR_LAST_EXPENSE,
+    SENSOR_PENDING_COUNT,
     SENSOR_SPENDING_MONTH,
     SENSOR_SPENDING_TOTAL_MONTH,
 )
@@ -57,6 +58,9 @@ async def async_setup_entry(
         entities.append(BalanceSensor(coordinator, entry, user_id, display_name, home_currency))
         entities.append(
             SpendingMonthSensor(coordinator, entry, user_id, display_name, home_currency)
+        )
+        entities.append(
+            PendingCountSensor(coordinator, entry, user_id, display_name, home_currency)
         )
 
     # Integration-level sensors
@@ -297,4 +301,85 @@ class LastExpenseSensor(_SplitsmartSensor):
             "date": last.get("date"),
             "paid_by": last.get("paid_by"),
             "expense_id": last.get("id"),
+        }
+
+
+# ------------------------------------------------------------------ pending count (M3)
+
+
+class PendingCountSensor(_SplitsmartSensor):
+    """Count of pending rows in one participant's staging inbox.
+
+    Integer scalar. The Home tile on the card reads this through
+    ``hass.states`` for its "You have N rows to review" label; the attributes
+    partition that count into promotable (currency matches home) and
+    blocked-foreign-currency (waiting on M4's FX). The partition is the O4
+    decision in M3_PLAN §8: foreign-currency rows stage successfully but
+    can't promote until M4, and the sensor surfaces how many rows that
+    affects without re-reading the file.
+    """
+
+    # Count, not money. state_class=TOTAL stays (recorder stores it as a
+    # sum-ish integer), but no monetary device class and no unit.
+    _attr_device_class = None
+
+    def __init__(
+        self,
+        coordinator: SplitsmartCoordinator,
+        entry: ConfigEntry,
+        user_id: str,
+        display_name: str,
+        home_currency: str,
+    ) -> None:
+        super().__init__(coordinator, entry)
+        self._user_id = user_id
+        self._display_name = display_name
+        self._home_currency = home_currency
+        self._attr_unique_id = f"{entry.entry_id}_{SENSOR_PENDING_COUNT}_{user_id}"
+        self._attr_translation_key = SENSOR_PENDING_COUNT
+        self._attr_native_unit_of_measurement = "rows"
+
+    @property
+    def name(self) -> str:
+        return f"Pending count {self._display_name}"
+
+    def _pending_rows(self) -> list[dict[str, Any]]:
+        if self.coordinator.data is None:
+            return []
+        return [
+            r
+            for r in self.coordinator.data.staging_by_user.get(self._user_id, [])
+            if r.get("rule_action") == "pending"
+        ]
+
+    @property
+    def native_value(self) -> int | None:
+        if self.coordinator.data is None:
+            return None
+        return len(self._pending_rows())
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        if self.coordinator.data is None:
+            return {}
+        rows = self._pending_rows()
+        promotable = sum(1 for r in rows if r.get("currency") == self._home_currency)
+        blocked = len(rows) - promotable
+
+        uploaded_ats = [r.get("uploaded_at") for r in rows if r.get("uploaded_at")]
+        last_imported_at = max(uploaded_ats) if uploaded_ats else None
+
+        dates = [r.get("date") for r in rows if r.get("date")]
+        oldest_pending_date = min(dates) if dates else None
+
+        return {
+            # Exposed so the frontend can pick the current user's sensor from
+            # hass.states without relying on slugged-display-name matching.
+            "user_id": self._user_id,
+            "last_imported_at": last_imported_at,
+            "home_currency": self._home_currency,
+            "oldest_pending_date": oldest_pending_date,
+            # Invariant per O4: promotable_count + blocked_foreign_currency_count == state.
+            "promotable_count": promotable,
+            "blocked_foreign_currency_count": blocked,
         }

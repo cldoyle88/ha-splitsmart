@@ -65,6 +65,7 @@ async def test_ensure_layout_creates_dirs(tmp_path: pathlib.Path):
     assert (root / "shared").is_dir()
     assert (root / "staging").is_dir()
     assert (root / "receipts" / "incoming").is_dir()
+    assert (root / "uploads").is_dir()
 
 
 @pytest.mark.asyncio
@@ -86,6 +87,14 @@ def test_path_helpers(tmp_path: pathlib.Path):
     assert storage.staging_path("user_abc").name == "user_abc.jsonl"
     # Staging paths must be isolated per user
     assert storage.staging_path("user_abc") != storage.staging_path("user_def")
+
+    # M3 additions
+    assert storage.uploads_dir.name == "uploads"
+    assert storage.uploads_dir == tmp_path / "splitsmart" / "uploads"
+    assert storage.mappings_path.name == "mappings.jsonl"
+    assert storage.upload_path("abcd-1234", "csv").name == "abcd-1234.csv"
+    # Extension normalisation: strip leading dot, lower-case.
+    assert storage.upload_path("abcd-1234", ".XLSX").name == "abcd-1234.xlsx"
 
 
 # ------------------------------------------------------------------ append + read_all
@@ -282,6 +291,21 @@ async def test_append_tombstone_no_reason(tmp_path: pathlib.Path):
         previous_snapshot={"id": "ex_xyz"},
     )
     assert tb["reason"] is None
+
+
+def test_tombstone_operation_constants_are_disjoint():
+    # M3 adds TOMBSTONE_PROMOTE; guard against accidental value collision with
+    # the existing operations now so dedup's operation filter stays honest.
+    from custom_components.splitsmart.const import (
+        TOMBSTONE_DELETE,
+        TOMBSTONE_DISCARD,
+        TOMBSTONE_EDIT,
+        TOMBSTONE_PROMOTE,
+    )
+
+    assert TOMBSTONE_PROMOTE == "promote"
+    values = {TOMBSTONE_EDIT, TOMBSTONE_DELETE, TOMBSTONE_DISCARD, TOMBSTONE_PROMOTE}
+    assert len(values) == 4
 
 
 # ------------------------------------------------------------------ JSON integrity

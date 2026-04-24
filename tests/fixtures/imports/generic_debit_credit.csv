@@ -1,0 +1,11 @@
+Transaction Date,Payee,Debit,Credit,Balance,Memo
+2026-04-15,Waitrose,47.83,,952.17,Groceries
+2026-04-16,Employer,,2450.00,3402.17,Salary
+2026-04-16,TFL,2.80,,3399.37,Oyster top-up
+2026-04-17,Mortgage,1100.00,,2299.37,April mortgage
+2026-04-18,Tesco,18.45,,2280.92,
+2026-04-18,Amazon,29.99,,2250.93,Household items
+2026-04-19,ATM,50.00,,2200.93,Cash withdrawal
+2026-04-19,Coffee Shop,3.20,,2197.73,
+2026-04-20,Standing order,45.00,,2152.73,Gym membership
+2026-04-20,Refund,,15.00,2167.73,Return

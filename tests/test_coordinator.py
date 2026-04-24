@@ -249,3 +249,126 @@ async def test_invalidate_then_full_replay(
 
     coordinator.data = await coordinator._async_update_data()
     assert "expenses.jsonl" in read_all_calls
+
+
+# ------------------------------------------------------------------ staging (M3)
+
+
+def _staging_row(*, user_id: str = "u1", amount: float = 4.50) -> dict[str, Any]:
+    """Minimal staging record for projection tests (real records are richer
+    but coordinator tests only care about id and the rule_action field)."""
+    from custom_components.splitsmart.storage import new_id
+
+    return {
+        "id": new_id("st"),
+        "uploaded_by": user_id,
+        "uploaded_at": "2026-04-22T10:00:00+01:00",
+        "source": "csv",
+        "source_ref": "statement.csv",
+        "date": "2026-04-15",
+        "description": "Coffee",
+        "amount": amount,
+        "currency": "GBP",
+        "rule_action": "pending",
+        "rule_id": None,
+        "category_hint": None,
+        "dedup_hash": "sha256:test",
+        "receipt_path": None,
+        "notes": None,
+    }
+
+
+async def test_full_replay_loads_per_user_staging(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    await storage.append(storage.staging_path("u2"), _staging_row(user_id="u2"))
+
+    data = await coordinator._async_update_data()
+    assert len(data.staging_by_user["u1"]) == 2
+    assert len(data.staging_by_user["u2"]) == 1
+    assert data.last_staging_id_by_user["u1"] is not None
+
+
+async def test_full_replay_ignores_orphan_staging_files(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
+    """A staging file for a user not in participants is not surfaced —
+    config is authoritative for "who has state"."""
+    await storage.append(storage.staging_path("u_orphan"), _staging_row(user_id="u_orphan"))
+
+    data = await coordinator._async_update_data()
+    assert "u_orphan" not in data.staging_by_user
+    assert set(data.staging_by_user.keys()) == {"u1", "u2"}
+
+
+async def test_full_replay_handles_missing_staging_file(
+    coordinator: SplitsmartCoordinator,
+):
+    # No staging files on disk — participants still get empty lists.
+    data = await coordinator._async_update_data()
+    assert data.staging_by_user == {"u1": [], "u2": []}
+
+
+async def test_full_replay_materialises_staging_against_tombstones(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
+    row_a = _staging_row(user_id="u1")
+    row_b = _staging_row(user_id="u1")
+    await storage.append(storage.staging_path("u1"), row_a)
+    await storage.append(storage.staging_path("u1"), row_b)
+    await storage.append_tombstone(
+        created_by="u1",
+        target_type="staging",
+        target_id=row_a["id"],
+        operation="discard",
+        previous_snapshot=row_a,
+    )
+
+    data = await coordinator._async_update_data()
+    # Raw still has both; materialised has only the surviving row.
+    assert len(data.raw_staging_by_user["u1"]) == 2
+    assert len(data.staging_by_user["u1"]) == 1
+    assert data.staging_by_user["u1"][0]["id"] == row_b["id"]
+
+
+async def test_note_write_refreshes_only_scoped_user_staging(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
+    """staging_user_id hint targets one user's staging path — another user's
+    staging path must not be re-read on that tick."""
+    # Seed initial state.
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    coordinator.data = await coordinator._async_update_data()
+
+    # Append rows for both users after the initial replay.
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    await storage.append(storage.staging_path("u2"), _staging_row(user_id="u2"))
+
+    await coordinator.async_note_write(staging_user_id="u1")
+    # Only u1's staging list should grow; u2's refresh must wait for the
+    # next write or the 5-min safety-net replay.
+    assert len(coordinator.data.staging_by_user["u1"]) == 2
+    assert len(coordinator.data.staging_by_user["u2"]) == 0
+
+
+async def test_note_write_without_user_hint_skips_staging_refresh(
+    coordinator: SplitsmartCoordinator, storage: SplitsmartStorage
+):
+    """An expense/settlement write doesn't touch staging — the coordinator
+    shouldn't reload staging files on every note_write."""
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    coordinator.data = await coordinator._async_update_data()
+
+    # Append a new staging row but don't pass staging_user_id.
+    await storage.append(storage.staging_path("u1"), _staging_row(user_id="u1"))
+    # Also append an expense so note_write has something to do.
+    await storage.append(storage.expenses_path, _tesco_expense())
+    await coordinator.async_note_write()
+
+    # Staging list unchanged — the new row awaits the next targeted hint
+    # or the safety-net tick.
+    assert len(coordinator.data.staging_by_user["u1"]) == 1
+    # But the expense write did land.
+    assert len(coordinator.data.expenses) == 1

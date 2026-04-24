@@ -16,11 +16,13 @@ from ulid import ULID
 from .const import (
     EXPENSES_FILE,
     ID_PREFIX_TOMBSTONE,
+    MAPPINGS_FILE,
     RECEIPTS_DIR,
     SETTLEMENTS_FILE,
     SHARED_DIR,
     STAGING_DIR,
     TOMBSTONES_FILE,
+    UPLOADS_DIR,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -75,6 +77,7 @@ class SplitsmartStorage:
             self._root / STAGING_DIR,
             self._root / RECEIPTS_DIR,
             self._root / RECEIPTS_DIR / "incoming",
+            self._root / UPLOADS_DIR,
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
@@ -96,6 +99,18 @@ class SplitsmartStorage:
 
     def staging_path(self, user_id: str) -> pathlib.Path:
         return self._root / STAGING_DIR / f"{user_id}.jsonl"
+
+    @property
+    def uploads_dir(self) -> pathlib.Path:
+        return self._root / UPLOADS_DIR
+
+    def upload_path(self, upload_id: str, extension: str) -> pathlib.Path:
+        ext = extension.lstrip(".").lower()
+        return self._root / UPLOADS_DIR / f"{upload_id}.{ext}"
+
+    @property
+    def mappings_path(self) -> pathlib.Path:
+        return self._root / MAPPINGS_FILE
 
     # --------------------------------------------------------- generic JSONL
 
@@ -169,8 +184,16 @@ class SplitsmartStorage:
         operation: str,
         previous_snapshot: dict[str, Any],
         reason: str | None = None,
+        replacement_id: str | None = None,
     ) -> dict[str, Any]:
-        """Build, append, and return a tombstone record."""
+        """Build, append, and return a tombstone record.
+
+        ``replacement_id`` is written when the tombstone represents a morph
+        rather than an end-of-life — notably ``operation="promote"`` on a
+        staging row, where ``replacement_id`` is the new shared expense's
+        id. Kept optional so expense/settlement edit/delete tombstones
+        don't carry a ``None`` field.
+        """
         record: dict[str, Any] = {
             "id": new_id(ID_PREFIX_TOMBSTONE),
             "created_at": datetime.now(tz=UTC).astimezone().isoformat(),
@@ -181,5 +204,7 @@ class SplitsmartStorage:
             "previous_snapshot": previous_snapshot,
             "reason": reason,
         }
+        if replacement_id is not None:
+            record["replacement_id"] = replacement_id
         await self.append(self.tombstones_path, record)
         return record

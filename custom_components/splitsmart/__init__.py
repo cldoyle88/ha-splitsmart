@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers.event import async_track_time_interval
 
+from .cleanup import sweep_uploads
 from .const import (
     CONF_CATEGORIES,
     CONF_HOME_CURRENCY,
@@ -80,8 +83,22 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     async_register_websocket_commands(hass)
 
+    # Register the upload endpoint.
+    from .http import async_register_http
+
+    async_register_http(hass)
+
     # Serve the bundle + fonts and auto-register the Lovelace resource.
     await async_register_frontend(hass)
+
+    # Hourly uploads cleanup — purges orphaned upload files (>24h old and
+    # not referenced by any live staging row).
+    def _cleanup(_now):
+        staging = coordinator.data.staging_by_user if coordinator.data else {}
+        sweep_uploads(storage.uploads_dir, staging)
+
+    cleanup_unsub = async_track_time_interval(hass, _cleanup, timedelta(hours=1))
+    entry.async_on_unload(cleanup_unsub)
 
     # Invalidate coordinator when options change
     async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:

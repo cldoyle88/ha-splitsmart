@@ -7,6 +7,205 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added – M3 Import Pipeline (2026-04-22)
+
+**Parsers + mapping cascade (`custom_components/splitsmart/importer/`)**
+- CSV, XLSX, OFX and QIF parsers with a uniform `inspect(path)` +
+  `parse(path, mapping)` surface. CSV tries UTF-8-with-BOM and
+  falls back to cp1252 so Excel-on-Windows exports round-trip
+  cleanly. XLSX runs `openpyxl` under `run_in_executor` to keep
+  the event loop responsive. OFX uses `ofxparse` under the same
+  executor pattern; QIF is hand-rolled against the line-oriented
+  format with D/T/P/M/L codes and a trailing-caret tolerance for
+  real-world dialects. Per-row parse errors accumulate on
+  `ParseOutcome.errors` instead of aborting the whole file.
+- Preset registry (`presets.py`) for Monzo, Starling, Revolut and
+  Splitwise. Detectors require a distinctive column per preset
+  (Monzo's Emoji, Starling's Counter Party, Revolut's Started
+  Date + Product, Splitwise's Cost) so a generic "Date, Name,
+  Amount" CSV doesn't masquerade as any of them. Case-insensitive;
+  tolerates extra columns.
+- `apply_mapping` translates one raw row to a canonical `RawRow`,
+  handling commas, £/$/€, accountant-style parens on amounts, and
+  a short UK-first list of date formats. ISO dates via
+  `datetime.fromisoformat` first (covers Starling's timestamp
+  cells); strptime fallback otherwise.
+- `file_origin_hash` is a stable SHA-1 fingerprint over the
+  normalised header row, column count and extension so next
+  month's same-shape file resolves to the same key.
+- `mappings.jsonl` persists user-authored column mappings keyed
+  on the origin hash. Newest entry per hash wins on read.
+- `importer.__init__.py` facade exposes `inspect_file(path,
+  storage)` and `parse_file(path, *, user_mapping, storage)` — the
+  mapping cascade is explicit arg > preset > saved-by-hash, and
+  raises `ImporterError(code="mapping_required", inspection=...)`
+  when nothing resolves so Developer Tools / the M5 wizard can
+  surface a column-picker without a second round trip.
+
+**Multiset dedup (`importer/dedup.py`)**
+- `partition_by_dedup` is pure multiset arithmetic over three
+  pre-filtered lists: caller's effective staging, effective
+  shared ledger, caller's discard-only staging tombstones.
+  Promote tombstones are intentionally excluded because the
+  resulting shared expense already counts in `existing_shared` —
+  this is why staging gets a new `TOMBSTONE_PROMOTE` operation
+  rather than overloading `discard` with a `replacement_id` flag.
+- Description normalisation (`normalise.py`) strips leading `*`,
+  trailing dd/mm or yyyy-mm-dd date suffixes, upper-cases and
+  collapses whitespace, so three coffees in a row all share one
+  hash and `TFL TRAVEL 15/04` collapses with `TFL TRAVEL 16/04`.
+
+**Staging lifecycle (`services.py`, `services.yaml`)**
+- `splitsmart.import_file(upload_id, mapping?, remember_mapping?)`
+  ties the upload endpoint, parser facade, dedup and staging
+  write together. Response reports `imported`,
+  `skipped_as_duplicate`, `parse_errors`, and `blocked_foreign_currency`
+  (rows that staged but can't be promoted until M4 FX lands),
+  plus the detected preset name. Foreign-currency rows stage with
+  their original currency; the per-sensor partition in step 7
+  surfaces the running total.
+- `splitsmart.promote_staging` writes the new shared expense
+  first, then a tombstone with `operation="promote"` and
+  `replacement_id=<expense_id>`. `paid_by` is free-form subject
+  to participant validation — the uploader and the payer are
+  decoupled (Chris imports the joint-account statement, Slav
+  paid some rows).
+- `splitsmart.skip_staging` writes `operation="discard"`, with
+  `previous_snapshot` carrying the full staging row including
+  `dedup_hash` so skip-is-sticky survives re-imports.
+- Both staging services reject cross-user access with
+  `permission_denied` per SPEC §7; foreign-currency rows at
+  promote surface the verbatim user-facing "Foreign currency
+  promotion arrives in M4. Row stays staged." error.
+
+**Materialisation + coordinator (`ledger.py`, `coordinator.py`)**
+- `materialise_staging` lives next to its siblings, applying the
+  shared tombstones log to any raw staging list. `st_` ids can't
+  collide with `ex_` or `sl_` so no target_type filter is needed.
+- `SplitsmartData` gains `raw_staging_by_user` / `staging_by_user`
+  / `last_staging_id_by_user` fields keyed on HA user_id. Full
+  replay iterates `entry.data[CONF_PARTICIPANTS]` — the config
+  entry is authoritative for "who has staging state", so orphan
+  staging files on disk for removed users are not surfaced.
+- `async_note_write` gains a `staging_user_id` kwarg. Service
+  handlers that wrote to a user's staging pass that user's id;
+  the coordinator reloads only that user's staging file rather
+  than every participant's. Writes that don't touch staging
+  (add_expense, etc.) continue to pass no arg and skip the
+  staging refresh entirely.
+
+**File upload endpoint (`http.py`)**
+- `POST /api/splitsmart/upload` accepts a multipart `file` field,
+  validates the caller is a Splitsmart participant, checks the
+  extension against `{csv,xlsx,ofx,qif}`, streams to
+  `/config/splitsmart/uploads/<uuid4>.<ext>`. A pre-flight
+  `Content-Length` check plus a running size counter during the
+  stream enforce a 25 MB cap. Inspection payload populated for
+  CSV/XLSX; null for OFX/QIF. Malformed-content inspection
+  failures don't abort the upload — the wizard can retry with an
+  explicit mapping.
+
+**Hourly cleanup (`cleanup.py`)**
+- `sweep_uploads` deletes files under `uploads/` that are BOTH
+  older than 24 hours AND not referenced by any live staging
+  row's `source_ref_upload_id`. `async_track_time_interval` fires
+  the sweep hourly (O3 decision — resilient to restart clock
+  skew, keeps the window tight). Pure function; `retention_seconds`
+  and `now` injectable so tests don't have to fake clocks.
+
+**Pending-count sensor (`sensor.py`)**
+- `sensor.splitsmart_pending_count_<user>`, one per participant.
+  State = count of `rule_action == "pending"` rows in that
+  user's effective staging. Attributes include `user_id` (for
+  frontend lookup), `promotable_count`, and
+  `blocked_foreign_currency_count`; the partition invariant
+  `state == promotable_count + blocked_foreign_currency_count`
+  is asserted by tests. `last_imported_at` and
+  `oldest_pending_date` round out the card's needs.
+
+**Websocket API (`websocket_api.py`)**
+- `splitsmart/list_staging`: one-shot, user-scoped. Returns the
+  caller's materialised staging rows plus the staging tombstones
+  targeting them. A request with `user_id != caller` returns
+  `permission_denied` so the card cannot inadvertently request
+  another participant's staging.
+- `splitsmart/list_staging/subscribe`: long-lived, user-scoped.
+  Delta events fire only when the caller's staging changes — u1's
+  subscription doesn't see u2's writes.
+- `splitsmart/list_presets`: static registry dump for the wizard.
+- `splitsmart/save_mapping`: persists a mapping under its origin
+  hash.
+- `splitsmart/inspect_upload`: re-runs `inspect_file` on a prior
+  `upload_id` so the wizard can re-render headers + samples
+  without re-uploading.
+
+**SPEC + constants**
+- `TOMBSTONE_PROMOTE = "promote"` added to `const.py`. Tombstone
+  records gain an optional `replacement_id` field on
+  `append_tombstone`; written only for promote tombstones.
+- SPEC §6.2 amended to document `source_ref_upload_id` and
+  `source_preset` on the staging schema example (per O7).
+
+**Home tile live count (frontend)**
+- `<ss-placeholder-tile>` gains an optional `pendingCount`
+  property. When set, the caption flips to "You have N rows to
+  review" / "You have 1 row to review" / "You're all caught up"
+  depending on the value; when null, the static caption stays.
+  The "Coming in M5" badge and `aria-disabled="true"` styling
+  stay regardless — the review queue UI is still M5.
+- `<ss-home-view>` takes a `pendingCount` prop and threads it to
+  the tile. The root card resolves the current user's sensor by
+  scanning `hass.states` for
+  `sensor.splitsmart_pending_count_*` entities and matching on
+  the `user_id` attribute (simpler than slugging the display name
+  into an entity_id).
+
+**Tests (198 new tests; 285 backend + 114 frontend total)**
+- Normalise (22): description recipe, hash stability, amount
+  rounding, field separation.
+- Presets (9): preset detection happy paths, case-insensitivity,
+  extra-column tolerance, required-key schema check.
+- Mapping (17): `file_origin_hash` stability and bucket
+  separation, `save/load` round-trip, newest-wins, Monzo /
+  Splitwise / Revolut / debit-credit translations, comma/parens
+  parsing.
+- Parsers (23): each bank's preset fixture + OFX/QIF sample, UTF-8
+  BOM + cp1252 fallback, empty file, malformed row, XLSX
+  datetime + short-row handling, QIF trailing-caret + type-
+  directive tolerance.
+- Facade (11): cascade resolution, `mapping_required` error,
+  unsupported extension, OFX/QIF skip the cascade.
+- Dedup (19): all eight M3_PLAN §4 edge cases plus empty inputs
+  plus a parametrised partition-sum invariant.
+- Services (20): happy path + re-import + partial dedup + skip
+  sticky for `import_file`; uploader-paid-by-partner,
+  cross-user rejection, foreign-currency message, override
+  description/date for `promote_staging`; dedup-hash
+  preservation, double-call rejection for `skip_staging`.
+- Sensor (6): zero/empty, rule_action filter, partition invariant
+  (3 GBP + 2 EUR + 1 USD → 3/3), per-user scoping, attribute
+  metadata, unique id.
+- Coordinator (6): per-user staging full replay, orphan-file
+  ignore, scoped refresh via `staging_user_id` hint.
+- HTTP upload (14): happy paths, auth/authz rejections, extension
+  whitelist + case-insensitivity, `Content-Length` cap, write-
+  target verification.
+- Cleanup (9): retention window, reference protection across
+  users, directory entries skipped, missing-field tolerance.
+- Websocket (14): list_staging scoping + tombstone surfacing,
+  subscribe cross-user isolation, presets dump, save_mapping
+  round-trip, inspect_upload happy + not_found + permission.
+- Frontend placeholder tile (+6): plural/singular/zero captions,
+  null-fallback, badge + aria-disabled stability.
+
+**Fixtures (`tests/fixtures/imports/`)**
+- Anonymised samples committed as immutable test inputs (per
+  CLAUDE.md): Monzo classic (10 rows with income + transfer),
+  Starling GBP (10 rows incl. standing order), Revolut (10 rows
+  spanning GBP/EUR/USD), Splitwise export (10 rows with category
+  hints), generic debit/credit CSV, generic no-preset CSV,
+  malformed CSV, minimal OFX 1.x SGML body, 10-transaction QIF.
+
 ### Pi QA outcome (2026-04-22)
 
 M2 passed the 17-section Pi QA checklist (`tests/MANUAL_QA_M2.md`). Two intermittent symptoms observed once and not reproduced after a fresh session were filed as M7-polish issues rather than blockers:

@@ -30,9 +30,11 @@ STORAGE_SUBDIR = "splitsmart"
 SHARED_DIR = "shared"
 STAGING_DIR = "staging"
 RECEIPTS_DIR = "receipts"
+UPLOADS_DIR = "uploads"
 EXPENSES_FILE = "expenses.jsonl"
 SETTLEMENTS_FILE = "settlements.jsonl"
 TOMBSTONES_FILE = "tombstones.jsonl"
+MAPPINGS_FILE = "mappings.jsonl"
 
 # JSONL record id prefixes
 ID_PREFIX_EXPENSE = "ex"
@@ -64,6 +66,8 @@ SOURCES = {SOURCE_MANUAL, SOURCE_STAGING, SOURCE_TELEGRAM, SOURCE_RECURRING}
 TOMBSTONE_EDIT = "edit"
 TOMBSTONE_DELETE = "delete"
 TOMBSTONE_DISCARD = "discard"
+# M3: staging row morphed into a shared expense. Tombstone carries replacement_id.
+TOMBSTONE_PROMOTE = "promote"
 
 # Tombstone target types
 TARGET_EXPENSE = "expense"
@@ -77,6 +81,10 @@ SERVICE_EDIT_EXPENSE = "edit_expense"
 SERVICE_EDIT_SETTLEMENT = "edit_settlement"
 SERVICE_DELETE_EXPENSE = "delete_expense"
 SERVICE_DELETE_SETTLEMENT = "delete_settlement"
+# M3 services
+SERVICE_IMPORT_FILE = "import_file"
+SERVICE_PROMOTE_STAGING = "promote_staging"
+SERVICE_SKIP_STAGING = "skip_staging"
 
 # Coordinator
 COORDINATOR_UPDATE_INTERVAL_MINUTES = 5
@@ -91,3 +99,5 @@ SENSOR_BALANCE = "balance"
 SENSOR_SPENDING_MONTH = "spending_month"
 SENSOR_SPENDING_TOTAL_MONTH = "spending_total_month"
 SENSOR_LAST_EXPENSE = "last_expense"
+# M3
+SENSOR_PENDING_COUNT = "pending_count"

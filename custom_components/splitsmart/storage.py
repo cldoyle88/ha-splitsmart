@@ -15,9 +15,12 @@ from ulid import ULID
 
 from .const import (
     EXPENSES_FILE,
+    FX_RATES_FILE,
     ID_PREFIX_TOMBSTONE,
     MAPPINGS_FILE,
     RECEIPTS_DIR,
+    RECURRING_STATE_FILE,
+    RECURRING_YAML_FILE,
     SETTLEMENTS_FILE,
     SHARED_DIR,
     STAGING_DIR,
@@ -81,6 +84,13 @@ class SplitsmartStorage:
         ]
         for d in dirs:
             d.mkdir(parents=True, exist_ok=True)
+
+        # Touch empty JSONL files so readers never have to special-case missing files.
+        # recurring.yaml is intentionally NOT created here — its absence means "no recurrings".
+        for empty_file in (self.fx_rates_path, self.recurring_state_path):
+            if not empty_file.exists():
+                empty_file.touch()
+
         _LOGGER.debug("Storage layout verified at %s", self._root)
 
     # ------------------------------------------------------------ path helpers
@@ -111,6 +121,18 @@ class SplitsmartStorage:
     @property
     def mappings_path(self) -> pathlib.Path:
         return self._root / MAPPINGS_FILE
+
+    @property
+    def fx_rates_path(self) -> pathlib.Path:
+        return self._root / FX_RATES_FILE
+
+    @property
+    def recurring_yaml_path(self) -> pathlib.Path:
+        return self._root / RECURRING_YAML_FILE
+
+    @property
+    def recurring_state_path(self) -> pathlib.Path:
+        return self._root / RECURRING_STATE_FILE
 
     # --------------------------------------------------------- generic JSONL
 

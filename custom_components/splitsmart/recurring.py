@@ -1,13 +1,22 @@
-"""Recurring-bill loader, validator, and schedule helpers for Splitsmart."""
+"""Recurring-bill loader, validator, schedule helpers, and materialiser for Splitsmart."""
 
 from __future__ import annotations
 
 import calendar
 import datetime as dt
+import json
 import logging
 import pathlib
 from dataclasses import dataclass, field
-from typing import Any
+from decimal import ROUND_HALF_UP, Decimal
+from typing import TYPE_CHECKING, Any
+
+import aiofiles
+
+if TYPE_CHECKING:
+    from .fx import FxClient, FxResult
+    from .ledger import build_expense_record, validate_expense_record
+    from .storage import SplitsmartStorage
 
 import voluptuous as vol
 
@@ -272,3 +281,244 @@ def dates_in_range(
             results.append(current)
         current += dt.timedelta(days=1)
     return results
+
+
+# ------------------------------------------------------------------ recurring state JSONL
+
+
+async def load_recurring_state(path: pathlib.Path) -> dict[str, dt.date]:
+    """Return {recurring_id: last_materialised_date} with newest-wins semantics."""
+    state: dict[str, dt.date] = {}
+    if not path.exists():
+        return state
+    async with aiofiles.open(path, encoding="utf-8") as fh:
+        async for raw in fh:
+            raw = raw.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+                rid = obj.get("recurring_id")
+                date_raw = obj.get("last_materialised_date")
+                if rid and date_raw:
+                    state[rid] = dt.date.fromisoformat(date_raw)
+            except (json.JSONDecodeError, ValueError):
+                pass
+    return state
+
+
+async def append_recurring_state(
+    path: pathlib.Path,
+    *,
+    recurring_id: str,
+    last_materialised_date: dt.date,
+) -> None:
+    """Append a state row for ``recurring_id`` with newest-wins."""
+    from .const import ID_PREFIX_RECURRING_STATE
+    from .storage import new_id
+
+    record = {
+        "id": new_id(ID_PREFIX_RECURRING_STATE),
+        "created_at": dt.datetime.now(tz=dt.timezone.utc).astimezone().isoformat(),
+        "recurring_id": recurring_id,
+        "last_materialised_date": last_materialised_date.isoformat(),
+    }
+    line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+    async with aiofiles.open(path, mode="a", encoding="utf-8") as fh:
+        await fh.write(line)
+        await fh.flush()
+
+
+# ------------------------------------------------------------------ materialiser
+
+
+@dataclass
+class MaterialiseResult:
+    materialised: int = 0
+    skipped_fx_failure: int = 0
+    skipped_duplicate: int = 0
+
+
+async def materialise_recurring(
+    *,
+    entries: list[RecurringEntry],
+    state: dict[str, dt.date],
+    existing_expenses: list[dict[str, Any]],
+    fx_client: Any,
+    home_currency: str,
+    participants: set[str],
+    known_categories: set[str],
+    storage: Any,
+    today: dt.date | None = None,
+    filter_id: str | None = None,
+) -> MaterialiseResult:
+    """Materialise recurring entries that are due.
+
+    Idempotent:
+    - Belt 1: ``state[recurring_id]`` tracks last materialised date.
+    - Belt 2: scan ``existing_expenses`` for (recurring_id, date) collisions.
+
+    FX failures are logged at WARNING and the date is skipped; other dates in
+    the same run still materialise. Only dates that successfully materialise
+    advance ``last_materialised_date``.
+
+    Privacy: only (recurring_id, date) logged at INFO. No amounts, no descriptions.
+    """
+    from .const import ID_PREFIX_EXPENSE, SOURCE_RECURRING
+    from .fx import FxUnavailableError, FxUnsupportedCurrencyError
+    from .ledger import SplitsmartValidationError, build_expense_record, validate_expense_record
+    from .storage import new_id
+
+    _today = today or dt.date.today()
+    result = MaterialiseResult()
+
+    # Pre-build a set of (recurring_id, date) that already exist for fast O(1) checks.
+    existing_pairs: set[tuple[str, str]] = {
+        (e.get("recurring_id", ""), e.get("date", ""))
+        for e in existing_expenses
+        if e.get("source") == SOURCE_RECURRING and e.get("recurring_id")
+    }
+
+    for entry in entries:
+        if filter_id is not None and entry.id != filter_id:
+            continue
+
+        last = state.get(entry.id)
+        floor = (last + dt.timedelta(days=1)) if last is not None else (entry.start_date or _today)
+        ceiling = min(_today, entry.end_date or _today)
+
+        if floor > ceiling:
+            continue
+
+        due_dates = dates_in_range(entry.schedule, floor=floor, ceiling=ceiling)
+        if not due_dates:
+            continue
+
+        # Backfill advisory on first materialisation with more than 3 entries
+        if last is None and len(due_dates) > 3:
+            _LOGGER.info(
+                "First materialisation of recurring '%s' will create %d backfill entries "
+                "(start_date: %s). Review recurring_state.jsonl after the run.",
+                entry.id,
+                len(due_dates),
+                entry.start_date,
+            )
+
+        highest_success: dt.date | None = None
+
+        for due_date in due_dates:
+            date_iso = due_date.isoformat()
+
+            # Belt 2: scan for existing expense with same (recurring_id, date)
+            if (entry.id, date_iso) in existing_pairs:
+                _LOGGER.debug(
+                    "Skipping duplicate recurring '%s' on %s (already in ledger)",
+                    entry.id, date_iso,
+                )
+                result.skipped_duplicate += 1
+                continue
+
+            # Resolve FX
+            try:
+                if entry.currency.upper() == home_currency.upper():
+                    fx_rate = Decimal("1")
+                    fx_date_iso = date_iso
+                else:
+                    fx_result = await fx_client.get_rate(
+                        date=due_date,
+                        from_currency=entry.currency,
+                        to_currency=home_currency,
+                    )
+                    fx_rate = fx_result.rate
+                    fx_date_iso = fx_result.fx_date.isoformat()
+            except (FxUnavailableError, FxUnsupportedCurrencyError) as exc:
+                _LOGGER.warning(
+                    "FX failure for recurring '%s' on %s: %s — skipping date",
+                    entry.id, date_iso, exc,
+                )
+                result.skipped_fx_failure += 1
+                continue
+
+            # Rescale category home_amounts by fx_rate
+            # (categories in recurring.yaml are authored in original currency)
+            total_home = (Decimal(str(entry.amount)) * fx_rate).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            categories = _rescale_categories(entry.categories, fx_rate, total_home)
+
+            expense = build_expense_record(
+                date=date_iso,
+                description=entry.description,
+                paid_by=entry.paid_by,
+                amount=entry.amount,
+                currency=entry.currency.upper(),
+                home_currency=home_currency,
+                categories=categories,
+                notes=None,
+                source=SOURCE_RECURRING,
+                staging_id=None,
+                receipt_path=None,
+                created_by=entry.paid_by,
+                fx_rate=fx_rate,
+                fx_date=fx_date_iso,
+                recurring_id=entry.id,
+            )
+
+            try:
+                validate_expense_record(
+                    expense,
+                    participants=participants,
+                    home_currency=home_currency,
+                    known_categories=known_categories,
+                )
+            except SplitsmartValidationError as err:
+                _LOGGER.warning(
+                    "Recurring '%s' on %s failed validation: %s — skipping",
+                    entry.id, date_iso, err,
+                )
+                result.skipped_fx_failure += 1  # treat validation failures as skip
+                continue
+
+            await storage.append(storage.expenses_path, expense)
+            existing_pairs.add((entry.id, date_iso))  # prevent intra-run double-write
+            highest_success = due_date
+            result.materialised += 1
+
+        # Update state once per recurring after processing all its dates
+        if highest_success is not None:
+            await append_recurring_state(
+                storage.recurring_state_path,
+                recurring_id=entry.id,
+                last_materialised_date=highest_success,
+            )
+            state[entry.id] = highest_success
+
+    return result
+
+
+def _rescale_categories(
+    categories: list[dict[str, Any]],
+    fx_rate: Decimal,
+    total_home: Decimal,
+) -> list[dict[str, Any]]:
+    """Return a new category list with home_amounts rescaled by fx_rate.
+
+    The last allocation absorbs any rounding drift so sum(home_amounts) == total_home
+    exactly. Splits are unchanged (they are dimensionless).
+    """
+    _cent = Decimal("0.01")
+    rescaled = []
+    running_sum = Decimal("0")
+
+    for i, alloc in enumerate(categories):
+        if i == len(categories) - 1:
+            # Last allocation absorbs drift
+            home_amount = float((total_home - running_sum).quantize(_cent, rounding=ROUND_HALF_UP))
+        else:
+            raw_home = Decimal(str(alloc["home_amount"])) * fx_rate
+            home_amount = float(raw_home.quantize(_cent, rounding=ROUND_HALF_UP))
+            running_sum += Decimal(str(home_amount))
+
+        rescaled.append({**alloc, "home_amount": home_amount})
+
+    return rescaled

@@ -131,7 +131,8 @@ All data lives under `/config/splitsmart/`. Never under `/config/www/` — those
 │   ├── expenses.jsonl
 │   ├── settlements.jsonl
 │   └── tombstones.jsonl           # Edit/delete history
-├── recurring.yaml                 # Recurring bill templates
+├── recurring.yaml                 # Recurring bill templates (user-authored)
+├── recurring_state.jsonl          # Per-recurring last_materialised_date (machine-updated, newest-wins per id)
 ├── fx_rates.jsonl                 # Cached Frankfurter rates
 └── receipts/
     ├── incoming/<uuid>.jpg        # Pre-OCR, private to uploader
@@ -221,6 +222,7 @@ All data lives under `/config/splitsmart/`. Never under `/config/www/` — those
   ],
   "source": "manual|staging|telegram|recurring",
   "staging_id": "st_01J9X...",
+  "recurring_id": null,
   "receipt_path": "receipts/2026/04/ex_01J9X.jpg",
   "notes": null,
   "comments": []
@@ -296,11 +298,11 @@ Performance: for a household logging 5000 expenses/year, the full log replays in
 - `amount` + `currency` (what the user paid)
 - `home_amount` + `home_currency` + `fx_rate` + `fx_date` (converted once, locked in)
 
-**Backdated entries** look up the historical rate from Frankfurter (`https://api.frankfurter.app/{date}?from={ccy}&to={home}`) at entry time. Rate + fx_date stored on the expense, never recalculated.
+**Backdated entries** look up the historical rate from Frankfurter (`https://api.frankfurter.dev/v1/{date}?from={ccy}&to={home}`) at entry time. Rate + fx_date stored on the expense, never recalculated.
 
-**Daily rate cache:** a scheduled task (HA's `async_track_time_interval`, daily at 08:00) pulls that day's rate for every non-home currency seen in the ledger in the last 90 days. Cached in `fx_rates.jsonl`. Offline fallback: last-known rate for the pair, with a log warning.
+**Cache:** rates are cached in `fx_rates.jsonl` keyed on `(from, to, requested_date)`, newest-wins on read. Historical ECB rates are immutable once published, so the cache is authoritative for past dates; today's rate is cached on first call and reused for the remainder of the day. No pre-warming task — fetch-on-demand is sufficient at household scale.
 
-**No Frankfurter access during entry:** the card allows entry but marks the expense with `fx_rate: null, fx_status: "pending"`. A retry task runs every 15 minutes and fills in pending rates when network comes back.
+**Failure model.** On a call to any write service that requires FX (non-home currency and no explicit `fx_rate`), the integration tries the cache first and Frankfurter on miss. If both fail, the write is rejected with `ServiceValidationError`; no partial or pending expense record is written. The caller (UI, automation, user at Developer Tools) retries when connectivity returns. `binary_sensor.splitsmart_fx_healthy` surfaces whether the most recent FX lookup succeeded within the last 24 hours.
 
 ## 9. Split and category allocation
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from datetime import timedelta
 from pathlib import Path
@@ -10,7 +11,7 @@ from typing import TYPE_CHECKING
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
-from homeassistant.helpers.event import async_track_time_interval
+from homeassistant.helpers.event import async_track_time_change, async_track_time_interval
 
 from .cleanup import sweep_uploads
 from .const import (
@@ -103,6 +104,45 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     cleanup_unsub = async_track_time_interval(hass, _cleanup, timedelta(hours=1))
     entry.async_on_unload(cleanup_unsub)
+
+    # Daily 03:00 recurring materialisation — catches up any due dates since
+    # the last run and writes new expense records to the shared ledger.
+    async def _materialise_daily(_now: dt.datetime) -> None:
+        from .recurring import load_recurring, load_recurring_state, materialise_recurring
+
+        recurring_entries = load_recurring(
+            storage.recurring_yaml_path,
+            participants=list(participants),
+        )
+        if not recurring_entries:
+            return
+
+        state = await load_recurring_state(storage.recurring_state_path)
+        existing_expenses = await storage.read_all(storage.expenses_path)
+        result = await materialise_recurring(
+            entries=recurring_entries,
+            state=state,
+            existing_expenses=existing_expenses,
+            fx_client=fx_client,
+            home_currency=home_currency,
+            participants=set(participants),
+            known_categories=set(categories),
+            storage=storage,
+        )
+        if result.materialised or result.skipped_fx_failure:
+            _LOGGER.info(
+                "Recurring materialisation: %d written, %d FX failures, %d duplicates skipped",
+                result.materialised,
+                result.skipped_fx_failure,
+                result.skipped_duplicate,
+            )
+        if result.materialised:
+            await coordinator.async_refresh()
+
+    materialise_unsub = async_track_time_change(
+        hass, _materialise_daily, hour=3, minute=0, second=0
+    )
+    entry.async_on_unload(materialise_unsub)
 
     # Invalidate coordinator when options change
     async def _async_options_updated(hass: HomeAssistant, entry: ConfigEntry) -> None:

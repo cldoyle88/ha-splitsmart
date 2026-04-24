@@ -449,7 +449,17 @@ Two belts on one trousers:
 - **Belt 1:** `last_materialised_date` in `recurring_state.jsonl` prevents re-running the same date after a normal catch-up.
 - **Belt 2:** Scanning expenses for `(recurring_id, date)` prevents a double-up if the state file is ever manually deleted, corrupted, or if two HA instances ever run against the same config directory (pathological but real).
 
-Cost: O(expenses × recurrings × catch-up-days). At household scale with ~5 recurrings and a normal ≤1-day catch-up, cost is negligible. If a user adds a recurring with `start_date: 2024-01-01` and no `last_materialised_date` yet, the first run materialises ~27 months of entries — potentially slow. Decision Q3 covers whether we want to backfill that far by default.
+Cost: O(expenses × recurrings × catch-up-days). At household scale with ~5 recurrings and a normal ≤1-day catch-up, cost is negligible. If a user adds a recurring with `start_date: 2024-01-01` and no `last_materialised_date` yet, the first run materialises ~27 months of entries — potentially slow. Q3 (§10) resolved in favour of backfilling; the advisory below softens the surprise.
+
+### Backfill advisory (addendum from Q3 resolution)
+
+When materialising a recurring whose `last_materialised_date` is `None` (i.e. first run ever for that `recurring_id`), count the dates the schedule would match between `start_date` and today inclusive. If that count exceeds **3**, log one INFO line before materialisation begins:
+
+```
+First materialisation of recurring '{id}' will create N backfill entries (start_date: {start_date}). Review recurring_state.jsonl after the run.
+```
+
+Fired exactly once per recurring_id (only when `last_materialised_date` transitions from `None` to non-`None`). Threshold of 3 chosen so a normal "started today" recurring with one match produces no log noise; anything larger is surprising enough to warrant a heads-up. Doesn't block, doesn't prompt — cheap visibility only.
 
 ### `splitsmart.materialise_recurring` service
 
@@ -692,23 +702,32 @@ Produced at the end of M4. Checklist covers:
 
 **R9 — Recurring idempotency: two belts.** `recurring_state.jsonl` last-materialised-date check AND expense-scan for `(recurring_id, date)`. Cheap; defends against state-file corruption.
 
-### Open questions for you
+**R10 — Cache key semantics.** `FxClient.get_rate`'s docstring explicitly notes the cache is keyed on `requested_date` (what the caller asked for), not `fx_date` (what Frankfurter returned). This is how a re-query for the same Sunday hits cache: the first call stored `requested_date=2026-04-12, fx_date=2026-04-10`, and the second call's cache lookup on `2026-04-12` succeeds.
 
-Seven material decisions. Each has a proposal; flagging so you can override.
+**R11 — Allocation drift absorption on FX rescale.** When FX rescales a multi-category recurring bill, the **last allocation in the `categories` array** (as written in `recurring.yaml`) absorbs rounding drift. Deterministic, user-controllable — the user can reorder their YAML entries to pick which category takes the drift. Not the smallest allocation, not the alphabetically-last.
 
-**Q1 — Monthly `day: 31` in February.** Proposal: **clamp to last day of month** (monthly day=31 fires on 28 Feb in non-leap years, 29 Feb in leap years, 30 in April). Alternative: skip months where the day doesn't exist. Clamp matches common bill scheduling ("end-of-month rent"), but "skip" is defensible if users model "pay on the 31st literally". Your call.
+### Formerly open questions (all resolved 2026-04-24)
+
+**Q1 — Monthly `day: 31` in February.** Proposal: **clamp to last day of month** (monthly day=31 fires on 28 Feb in non-leap years, 29 Feb in leap years, 30 in April). Alternative: skip months where the day doesn't exist. Clamp matches common bill scheduling ("end-of-month rent"), but "skip" is defensible if users model "pay on the 31st literally".
+**Resolved:** Clamp to last day of month.
 
 **Q2 — Annually `month: 2, day: 29` in non-leap years.** Proposal: **clamp to 28 Feb**. Alternatives: skip (fire every 4 years only), advance to 1 Mar. Clamp matches the monthly rule and gives the user a predictable "once a year" cadence.
+**Resolved:** Clamp to 28 Feb.
 
-**Q3 — Backfill on first run of a newly-added recurring with a historical `start_date`.** Proposal: **backfill from `start_date`**. If a user adds a monthly recurring with `start_date: 2024-01-01` today, the first materialisation creates ~27 expenses at once. This could surprise a user who expected "start now". Alternative: start from today regardless of `start_date`, then advance normally. Safer but inconsistent with the `start_date` field's apparent meaning. Your call.
+**Q3 — Backfill on first run of a newly-added recurring with a historical `start_date`.** Proposal: **backfill from `start_date`**. If a user adds a monthly recurring with `start_date: 2024-01-01` today, the first materialisation creates ~27 expenses at once. This could surprise a user who expected "start now". Alternative: start from today regardless of `start_date`, then advance normally. Safer but inconsistent with the `start_date` field's apparent meaning.
+**Resolved:** Backfill from `start_date`, with an INFO log advisory on first run when the backfill will produce >3 entries (see §7 "Backfill advisory" addendum).
 
-**Q4 — Materialisation path: direct write or through `splitsmart.add_expense`.** Proposal: **direct** — call `build_expense_record` + `storage.append(expenses_path, ...)` without going through the service. Rationale: no ServiceCall context to fake, simpler logging, no user_id assumption (the task runs with no caller). Cons: doesn't go through the voluptuous schema validator, so any bug in `build_expense_record` would slip through. Mitigated by `validate_expense_record` which both paths call. Your call.
+**Q4 — Materialisation path: direct write or through `splitsmart.add_expense`.** Proposal: **direct** — call `build_expense_record` + `storage.append(expenses_path, ...)` without going through the service. Rationale: no ServiceCall context to fake, simpler logging, no user_id assumption (the task runs with no caller). Cons: doesn't go through the voluptuous schema validator, so any bug in `build_expense_record` would slip through. Mitigated by `validate_expense_record` which both paths call.
+**Resolved:** Direct write.
 
-**Q5 — Frankfurter unsupported currency (e.g. VND).** Proposal: **distinct `FxUnsupportedCurrencyError` → distinct ServiceValidationError message** (per §4.3) so users understand it's a currency-coverage issue, not a connectivity issue. Alternative: treat as generic unavailable, one error surface. Your call.
+**Q5 — Frankfurter unsupported currency (e.g. VND).** Proposal: **distinct `FxUnsupportedCurrencyError` → distinct ServiceValidationError message** (per §4.3) so users understand it's a currency-coverage issue, not a connectivity issue. Alternative: treat as generic unavailable, one error surface.
+**Resolved:** Distinct error class with its own user-facing message.
 
-**Q6 — Sanity guard threshold.** Proposal: **50% symmetric (>1.5× or <0.667×)**, within ±365 days. 20% catches more errors but false-positives on real volatility (GBP post-Brexit). 100% only catches the truly absurd. 50% is the "this is almost certainly garbage" threshold. Your call if you want tighter/looser.
+**Q6 — Sanity guard threshold.** Proposal: **50% symmetric (>1.5× or <0.667×)**, within ±365 days. 20% catches more errors but false-positives on real volatility (GBP post-Brexit). 100% only catches the truly absurd. 50% is the "this is almost certainly garbage" threshold.
+**Resolved:** 50% symmetric, ±365 days.
 
-**Q7 — Recurring YAML parse error strategy.** Proposal: **log ERROR and skip** the malformed entry; valid entries still fire. Alternative: fail-fast at integration setup — refuse to start until the YAML is clean. Fail-fast is stricter but means a typo in an obscure field takes all recurrings offline. Your call.
+**Q7 — Recurring YAML parse error strategy.** Proposal: **log ERROR and skip** the malformed entry; valid entries still fire. Alternative: fail-fast at integration setup — refuse to start until the YAML is clean. Fail-fast is stricter but means a typo in an obscure field takes all recurrings offline.
+**Resolved:** Log ERROR and skip; valid entries still fire.
 
 ---
 

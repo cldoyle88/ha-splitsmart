@@ -1,0 +1,32 @@
+recurring:
+  - id: valid_one
+    description: Council tax
+    amount: 210.00
+    currency: GBP
+    paid_by: u1
+    categories:
+      - name: Utilities
+        home_amount: 210.00
+        split:
+          method: equal
+          shares:
+            - {user_id: u1, value: 50}
+            - {user_id: u2, value: 50}
+    schedule:
+      kind: monthly
+      day: 1
+    start_date: 2026-01-01
+
+  - id: bad_no_schedule
+    description: This entry has no schedule
+    amount: 50.00
+    currency: GBP
+    paid_by: u1
+    categories:
+      - name: Other
+        home_amount: 50.00
+        split:
+          method: equal
+          shares:
+            - {user_id: u1, value: 50}
+            - {user_id: u2, value: 50}

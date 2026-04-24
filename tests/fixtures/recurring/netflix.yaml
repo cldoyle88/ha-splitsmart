@@ -1,0 +1,18 @@
+recurring:
+  - id: netflix
+    description: Netflix
+    amount: 15.99
+    currency: GBP
+    paid_by: u1
+    categories:
+      - name: Subscriptions
+        home_amount: 15.99
+        split:
+          method: equal
+          shares:
+            - {user_id: u1, value: 50}
+            - {user_id: u2, value: 50}
+    schedule:
+      kind: monthly
+      day: 15
+    start_date: 2026-01-15

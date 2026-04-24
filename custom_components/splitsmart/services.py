@@ -34,7 +34,7 @@ from .const import (
     TOMBSTONE_EDIT,
     TOMBSTONE_PROMOTE,
 )
-from .fx import FxClient, FxUnavailableError, FxUnsupportedCurrencyError
+from .fx import FxClient, FxSanityError, FxUnavailableError, FxUnsupportedCurrencyError
 from .importer import parse_file
 from .importer.dedup import partition_by_dedup
 from .importer.mapping import save_mapping
@@ -249,9 +249,12 @@ async def _resolve_fx(
     # Live lookup via cache → Frankfurter
     import datetime as _dt
 
+    expense_date = _dt.date.fromisoformat(date)
+    today = _dt.date.today()
+
     try:
         result = await fx_client.get_rate(
-            date=_dt.date.fromisoformat(date),
+            date=expense_date,
             from_currency=currency,
             to_currency=home_currency,
         )
@@ -269,6 +272,35 @@ async def _resolve_fx(
             "Frankfurter is unreachable. Try again when connectivity returns, "
             "or provide fx_rate explicitly."
         )
+
+    # Sanity guard: compare resolved rate to today's rate when the date is
+    # within ±365 days. Skipped for older dates — rates can legitimately differ
+    # by more than 50% over longer periods.
+    if abs((today - expense_date).days) <= 365:
+        try:
+            today_result = await fx_client.get_rate(
+                date=today,
+                from_currency=currency,
+                to_currency=home_currency,
+            )
+            today_rate = today_result.rate
+            if today_rate and today_rate != 0:
+                ratio = result.rate / today_rate
+                if ratio > Decimal("1.5") or ratio < Decimal("2") / Decimal("3"):
+                    raise ServiceValidationError(
+                        f"Resolved FX rate {result.rate} for {currency}→{home_currency} "
+                        f"on {date} diverges by more than 50% from today's rate "
+                        f"{today_rate}. If this is intentional, provide fx_rate explicitly."
+                    )
+        except ServiceValidationError:
+            raise
+        except Exception:
+            # Today's lookup failed — swallow and skip the guard.
+            # The primary lookup succeeded; don't turn paranoia into a write failure.
+            _LOGGER.debug(
+                "FX sanity guard skipped: today's rate lookup failed for %s→%s",
+                currency, home_currency,
+            )
 
     return result.rate, result.fx_date.isoformat()
 

@@ -155,6 +155,10 @@ PROMOTE_STAGING_SCHEMA = vol.Schema(
         vol.Optional("override_description"): vol.Any(None, cv.string),
         vol.Optional("override_date"): vol.Any(None, cv.date),
         vol.Optional("reason"): vol.Any(None, cv.string),
+        # FX overrides — bypass the Frankfurter lookup when the caller already
+        # knows the correct rate (e.g. M3-staged rows re-promoted with explicit rate).
+        vol.Optional("fx_rate"): vol.All(vol.Coerce(float), vol.Range(min=0.000001)),
+        vol.Optional("fx_date"): cv.date,
     }
 )
 
@@ -602,12 +606,6 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
     staging_id: str = data["staging_id"]
     staging_row = _find_live_staging_row(coordinator, staging_id, caller)
 
-    # O4 foreign-currency guard: surface the user-facing message verbatim
-    # per M3_PLAN §8. The staging row stays live — the user retries once
-    # FX support ships in M4.
-    if staging_row["currency"] != home_currency:
-        raise ServiceValidationError("Foreign currency promotion arrives in M4. Row stays staged.")
-
     description: str = data.get("override_description") or staging_row["description"]
     date_value = data.get("override_date")
     date_str: str = date_value.isoformat() if date_value else staging_row["date"]
@@ -620,12 +618,23 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
             f"'paid_by' user {data['paid_by']!r} is not a configured participant"
         )
 
+    currency = staging_row["currency"]
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     new_expense = build_expense_record(
         date=date_str,
         description=description,
         paid_by=data["paid_by"],
         amount=float(staging_row["amount"]),
-        currency=staging_row["currency"],
+        currency=currency,
         home_currency=home_currency,
         categories=data["categories"],
         notes=data.get("notes"),
@@ -633,6 +642,8 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
         staging_id=staging_id,
         receipt_path=data.get("receipt_path", staging_row.get("receipt_path")),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:

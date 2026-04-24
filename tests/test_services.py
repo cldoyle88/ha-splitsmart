@@ -564,20 +564,18 @@ async def test_promote_staging_other_user_permission_denied(
         )
 
 
-async def test_promote_staging_foreign_currency_row_rejected_with_user_message(
+async def test_promote_staging_foreign_currency_fx_unavailable_row_stays_staged(
     storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
 ):
-    """Per O4 decision — the row stays staged; the message is the
-    verbatim user-facing copy in M3_PLAN §8."""
+    """M4: the M3 hard block is gone. Promotion of a EUR row now goes through the
+    FX cascade. When the network is down and the cache is empty, the write is
+    rejected and the staging row stays live."""
     row = await _seed_staging_row(storage, coordinator, currency="EUR")
-    hass = _make_hass(storage, coordinator)
+    hass = _make_hass(storage, coordinator)  # mock FxClient raises FxUnavailableError
 
     from homeassistant.exceptions import ServiceValidationError
 
-    with pytest.raises(
-        ServiceValidationError,
-        match=r"Foreign currency promotion arrives in M4\. Row stays staged\.",
-    ):
+    with pytest.raises(ServiceValidationError, match="Frankfurter"):
         await _handle_promote_staging(_make_call(hass, _waitrose_promote_payload(row["id"])))
 
     # Row remains live: no tombstone, still in staging_by_user.

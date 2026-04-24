@@ -78,6 +78,15 @@
       "pending_count": {
         "name": "Pending count"
       }
+    },
+    "binary_sensor": {
+      "fx_healthy": {
+        "name": "FX healthy",
+        "state": {
+          "on": "Reachable",
+          "off": "Unreachable"
+        }
+      }
     }
   }
 }

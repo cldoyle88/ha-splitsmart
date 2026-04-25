@@ -362,7 +362,7 @@ async def materialise_recurring(
     """
     from .const import SOURCE_RECURRING
     from .fx import FxUnavailableError, FxUnsupportedCurrencyError
-    from .ledger import SplitsmartValidationError, build_expense_record, validate_expense_record
+    from .ledger import SplitsmartValidationError, build_expense_record, rescale_categories, validate_expense_record
 
     _today = today or dt.date.today()
     result = MaterialiseResult()
@@ -442,7 +442,7 @@ async def materialise_recurring(
             total_home = (Decimal(str(entry.amount)) * fx_rate).quantize(
                 Decimal("0.01"), rounding=ROUND_HALF_UP
             )
-            categories = _rescale_categories(entry.categories, fx_rate, total_home)
+            categories = rescale_categories(entry.categories, fx_rate, total_home)
 
             expense = build_expense_record(
                 date=date_iso,
@@ -496,29 +496,3 @@ async def materialise_recurring(
     return result
 
 
-def _rescale_categories(
-    categories: list[dict[str, Any]],
-    fx_rate: Decimal,
-    total_home: Decimal,
-) -> list[dict[str, Any]]:
-    """Return a new category list with home_amounts rescaled by fx_rate.
-
-    The last allocation absorbs any rounding drift so sum(home_amounts) == total_home
-    exactly. Splits are unchanged (they are dimensionless).
-    """
-    _cent = Decimal("0.01")
-    rescaled = []
-    running_sum = Decimal("0")
-
-    for i, alloc in enumerate(categories):
-        if i == len(categories) - 1:
-            # Last allocation absorbs drift
-            home_amount = float((total_home - running_sum).quantize(_cent, rounding=ROUND_HALF_UP))
-        else:
-            raw_home = Decimal(str(alloc["home_amount"])) * fx_rate
-            home_amount = float(raw_home.quantize(_cent, rounding=ROUND_HALF_UP))
-            running_sum += Decimal(str(home_amount))
-
-        rescaled.append({**alloc, "home_amount": home_amount})
-
-    return rescaled

@@ -12,13 +12,11 @@ import pytest
 
 from custom_components.splitsmart.recurring import (
     RecurringEntry,
-    MaterialiseResult,
     append_recurring_state,
     load_recurring_state,
     materialise_recurring,
 )
 from custom_components.splitsmart.storage import SplitsmartStorage
-
 
 # ------------------------------------------------------------------ helpers
 

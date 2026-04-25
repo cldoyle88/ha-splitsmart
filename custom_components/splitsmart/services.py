@@ -35,7 +35,7 @@ from .const import (
     TOMBSTONE_EDIT,
     TOMBSTONE_PROMOTE,
 )
-from .fx import FxClient, FxSanityError, FxUnavailableError, FxUnsupportedCurrencyError
+from .fx import FxClient, FxUnsupportedCurrencyError
 from .importer import parse_file
 from .importer.dedup import partition_by_dedup
 from .importer.mapping import save_mapping
@@ -259,12 +259,12 @@ async def _resolve_fx(
             from_currency=currency,
             to_currency=home_currency,
         )
-    except FxUnsupportedCurrencyError:
+    except FxUnsupportedCurrencyError as exc:
         raise ServiceValidationError(
             f"Currency '{currency}' is not supported by the FX provider. "
             "Provide fx_rate explicitly or choose a different currency."
-        )
-    except Exception:
+        ) from exc
+    except Exception as exc:
         _LOGGER.error(
             "FX lookup failed for %s→%s on %s", currency, home_currency, date
         )
@@ -272,7 +272,7 @@ async def _resolve_fx(
             f"FX rate for {date} {currency}→{home_currency} is not cached and "
             "Frankfurter is unreachable. Try again when connectivity returns, "
             "or provide fx_rate explicitly."
-        )
+        ) from exc
 
     # Sanity guard: compare resolved rate to today's rate when the date is
     # within ±365 days. Skipped for older dates — rates can legitimately differ

@@ -5,9 +5,7 @@ from __future__ import annotations
 import datetime as dt
 import pathlib
 
-import pytest
-
-from custom_components.splitsmart.recurring import RecurringEntry, load_recurring
+from custom_components.splitsmart.recurring import load_recurring
 
 FIXTURES = pathlib.Path(__file__).parent / "fixtures" / "recurring"
 PARTICIPANTS = ["u1", "u2"]

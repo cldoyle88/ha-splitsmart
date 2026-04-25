@@ -9,7 +9,6 @@ supplied.
 from __future__ import annotations
 
 import datetime as dt
-import pathlib
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 
@@ -18,8 +17,6 @@ from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.splitsmart.fx import FxClient, FxResult, FxUnavailableError
 from custom_components.splitsmart.services import _resolve_fx
-from custom_components.splitsmart.storage import SplitsmartStorage
-
 
 # ------------------------------------------------------------------ helpers
 
@@ -68,7 +65,7 @@ async def test_rate_within_50pct_passes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_rate_49pct_higher_passes(tmp_path):
-    """rate = today * 1.49 — just under the 1.5× threshold."""
+    """rate = today * 1.49 — just under the 1.5x threshold."""
     today_rate = Decimal("0.8000")
     historical_rate = today_rate * Decimal("1.49")
     client = _make_fx_client(historical_rate=historical_rate, today_rate=today_rate)
@@ -89,7 +86,7 @@ async def test_rate_49pct_higher_passes(tmp_path):
 
 @pytest.mark.asyncio
 async def test_rate_more_than_15x_today_raises(tmp_path):
-    """resolved_rate > 1.5× today's → sanity error."""
+    """resolved_rate > 1.5x today's → sanity error."""
     today_rate = Decimal("0.8000")
     historical_rate = today_rate * Decimal("1.6")  # 60% higher
     client = _make_fx_client(historical_rate=historical_rate, today_rate=today_rate)
@@ -107,7 +104,7 @@ async def test_rate_more_than_15x_today_raises(tmp_path):
 
 @pytest.mark.asyncio
 async def test_rate_less_than_two_thirds_today_raises(tmp_path):
-    """resolved_rate < 0.667× today's → sanity error."""
+    """resolved_rate < 0.667x today's → sanity error."""
     today_rate = Decimal("0.8000")
     historical_rate = today_rate * Decimal("0.5")  # 50% of today = 50% lower
     client = _make_fx_client(historical_rate=historical_rate, today_rate=today_rate)
@@ -130,7 +127,7 @@ async def test_rate_less_than_two_thirds_today_raises(tmp_path):
 async def test_old_date_beyond_365_days_skips_guard(tmp_path):
     """Guard skips for dates beyond ±365 days — no error even if rate is absurd."""
     today_rate = Decimal("0.8000")
-    # historical = 10× today — would fire the guard if in range
+    # historical = 10x today — would fire the guard if in range
     historical_rate = today_rate * Decimal("10")
     client = _make_fx_client(historical_rate=historical_rate, today_rate=today_rate)
     old_date = (dt.date.today() - dt.timedelta(days=400)).isoformat()
@@ -145,7 +142,7 @@ async def test_old_date_beyond_365_days_skips_guard(tmp_path):
     assert rate == historical_rate  # returned normally, no guard fired
 
 
-# ------------------------------------------------------------------ guard skipped: today's lookup fails
+# ------------------------------------------------------------------ guard skipped: today rate fails
 
 
 @pytest.mark.asyncio

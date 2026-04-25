@@ -7,10 +7,7 @@ from __future__ import annotations
 
 import datetime as dt
 
-import pytest
-
 from custom_components.splitsmart.recurring import dates_in_range, schedule_matches
-
 
 # ------------------------------------------------------------------ monthly
 

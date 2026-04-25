@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import datetime as dt
 import json
 import pathlib
@@ -13,12 +12,10 @@ import pytest
 
 from custom_components.splitsmart.fx import (
     FxClient,
-    FxResult,
     FxUnavailableError,
     FxUnsupportedCurrencyError,
 )
 from custom_components.splitsmart.storage import SplitsmartStorage
-
 
 # ------------------------------------------------------------------ helpers
 
@@ -86,7 +83,7 @@ def _mock_http_response(payload: dict | None, status: int = 200):
 
 @pytest.mark.asyncio
 async def test_same_currency_returns_one_without_io(tmp_path):
-    client, storage = _make_client(tmp_path)
+    client, _storage = _make_client(tmp_path)
     # fx_rates.jsonl does not exist — would blow up if accessed
     result = await client.get_rate(
         date=dt.date(2026, 4, 15), from_currency="GBP", to_currency="GBP"
@@ -216,7 +213,7 @@ async def test_retry_succeeds_after_timeout(tmp_path):
         nonlocal call_count
         call_count += 1
         if call_count == 1:
-            raise asyncio.TimeoutError()
+            raise TimeoutError()
         return good_resp
 
     session_mock.get = MagicMock(side_effect=get_side_effect)
@@ -239,7 +236,7 @@ async def test_both_attempts_timeout_no_cache_raises(tmp_path):
     storage.fx_rates_path.touch()
 
     session_mock = MagicMock()
-    session_mock.get = MagicMock(side_effect=asyncio.TimeoutError())
+    session_mock.get = MagicMock(side_effect=TimeoutError())
 
     with (
         patch("custom_components.splitsmart.fx.async_get_clientsession", return_value=session_mock),

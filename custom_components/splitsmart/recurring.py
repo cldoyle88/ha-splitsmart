@@ -7,16 +7,14 @@ import datetime as dt
 import json
 import logging
 import pathlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, Any
 
 import aiofiles
 
 if TYPE_CHECKING:
-    from .fx import FxClient, FxResult
-    from .ledger import build_expense_record, validate_expense_record
-    from .storage import SplitsmartStorage
+    pass
 
 import voluptuous as vol
 
@@ -207,7 +205,8 @@ def load_recurring(
         # Participant check for paid_by
         if validated["paid_by"] not in participants:
             _LOGGER.error(
-                "recurring.yaml: entry '%s' paid_by '%s' is not a configured participant — skipping",
+                "recurring.yaml: entry '%s' paid_by '%s' is not a configured participant"
+                " — skipping",
                 entry_id,
                 validated["paid_by"],
             )
@@ -319,7 +318,7 @@ async def append_recurring_state(
 
     record = {
         "id": new_id(ID_PREFIX_RECURRING_STATE),
-        "created_at": dt.datetime.now(tz=dt.timezone.utc).astimezone().isoformat(),
+        "created_at": dt.datetime.now(tz=dt.UTC).astimezone().isoformat(),
         "recurring_id": recurring_id,
         "last_materialised_date": last_materialised_date.isoformat(),
     }
@@ -364,10 +363,9 @@ async def materialise_recurring(
 
     Privacy: only (recurring_id, date) logged at INFO. No amounts, no descriptions.
     """
-    from .const import ID_PREFIX_EXPENSE, SOURCE_RECURRING
+    from .const import SOURCE_RECURRING
     from .fx import FxUnavailableError, FxUnsupportedCurrencyError
     from .ledger import SplitsmartValidationError, build_expense_record, validate_expense_record
-    from .storage import new_id
 
     _today = today or dt.date.today()
     result = MaterialiseResult()

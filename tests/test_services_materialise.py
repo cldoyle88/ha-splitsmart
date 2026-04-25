@@ -13,7 +13,6 @@ from custom_components.splitsmart.coordinator import SplitsmartCoordinator
 from custom_components.splitsmart.services import _handle_materialise_recurring
 from custom_components.splitsmart.storage import SplitsmartStorage
 
-
 # ------------------------------------------------------------------ fixtures
 
 

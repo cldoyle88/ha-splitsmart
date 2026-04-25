@@ -5,14 +5,13 @@ from __future__ import annotations
 import datetime as dt
 import json
 import pathlib
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from custom_components.splitsmart.binary_sensor import FxHealthySensor, _FX_HEALTHY_WINDOW
+from custom_components.splitsmart.binary_sensor import FxHealthySensor
 from custom_components.splitsmart.fx import FxClient
 from custom_components.splitsmart.storage import SplitsmartStorage
-
 
 # ------------------------------------------------------------------ helpers
 
@@ -64,7 +63,7 @@ def test_is_on_true_when_recent_success():
     entry.entry_id = "test_entry"
     fx_client = MagicMock(spec=FxClient)
     sensor = FxHealthySensor(coordinator, entry, fx_client)
-    sensor._last_success = dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(hours=1)
+    sensor._last_success = dt.datetime.now(tz=dt.UTC) - dt.timedelta(hours=1)
     assert sensor.is_on is True
 
 
@@ -75,7 +74,7 @@ def test_is_on_true_at_23h():
     entry.entry_id = "test_entry"
     fx_client = MagicMock(spec=FxClient)
     sensor = FxHealthySensor(coordinator, entry, fx_client)
-    sensor._last_success = dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(hours=23)
+    sensor._last_success = dt.datetime.now(tz=dt.UTC) - dt.timedelta(hours=23)
     assert sensor.is_on is True
 
 
@@ -86,7 +85,7 @@ def test_is_on_false_at_25h():
     entry.entry_id = "test_entry"
     fx_client = MagicMock(spec=FxClient)
     sensor = FxHealthySensor(coordinator, entry, fx_client)
-    sensor._last_success = dt.datetime.now(tz=dt.timezone.utc) - dt.timedelta(hours=25)
+    sensor._last_success = dt.datetime.now(tz=dt.UTC) - dt.timedelta(hours=25)
     assert sensor.is_on is False
 
 
@@ -111,7 +110,7 @@ def test_extra_state_attributes_iso_when_success():
     entry.entry_id = "test_entry"
     fx_client = MagicMock(spec=FxClient)
     sensor = FxHealthySensor(coordinator, entry, fx_client)
-    ts = dt.datetime(2026, 4, 24, 14, 30, tzinfo=dt.timezone.utc)
+    ts = dt.datetime(2026, 4, 24, 14, 30, tzinfo=dt.UTC)
     sensor._last_success = ts
     attrs = sensor.extra_state_attributes
     assert attrs["last_checked"] == ts.isoformat()

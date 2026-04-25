@@ -6,7 +6,6 @@ import asyncio
 import datetime as dt
 import json
 import logging
-import pathlib
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import TYPE_CHECKING, Literal
@@ -188,7 +187,7 @@ class FxClient:
             "to_currency": to_ccy,
             "rate": str(result.rate),
             "fx_date": result.fx_date.isoformat(),
-            "fetched_at": dt.datetime.now(tz=dt.timezone.utc).astimezone().isoformat(),
+            "fetched_at": dt.datetime.now(tz=dt.UTC).astimezone().isoformat(),
         }
         line = json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
         path = self._storage.fx_rates_path
@@ -206,7 +205,9 @@ class FxClient:
         last_exc: Exception | None = None
         for attempt in range(2):
             if attempt > 0:
-                _LOGGER.debug("FX retry attempt %d for %s→%s %s", attempt, from_ccy, to_ccy, date_iso)
+                _LOGGER.debug(
+                    "FX retry attempt %d for %s→%s %s", attempt, from_ccy, to_ccy, date_iso
+                )
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
             try:
                 async with session.get(url, timeout=_TIMEOUT_SECONDS) as resp:
@@ -269,7 +270,7 @@ class FxClient:
                 raise
             except FxUnavailableError:
                 raise
-            except (asyncio.TimeoutError, Exception) as exc:
+            except (TimeoutError, Exception) as exc:
                 if attempt == 0:
                     _LOGGER.debug("FX fetch transient error on attempt 0: %s", exc)
                 last_exc = exc

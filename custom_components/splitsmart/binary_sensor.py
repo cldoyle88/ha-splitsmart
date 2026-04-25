@@ -76,10 +76,10 @@ class FxHealthySensor(CoordinatorEntity[SplitsmartCoordinator], BinarySensorEnti
     def is_on(self) -> bool:
         if self._last_success is None:
             return False
-        now = dt.datetime.now(tz=dt.timezone.utc)
+        now = dt.datetime.now(tz=dt.UTC)
         last = self._last_success
         if last.tzinfo is None:
-            last = last.replace(tzinfo=dt.timezone.utc)
+            last = last.replace(tzinfo=dt.UTC)
         return (now - last) <= _FX_HEALTHY_WINDOW
 
     @property

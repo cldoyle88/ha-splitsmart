@@ -135,7 +135,9 @@ async def test_materialise_recurring_service_no_recurring_yaml(storage, coordina
 @pytest.mark.asyncio
 async def test_materialise_recurring_service_filter_id(storage, coordinator):
     """filter_id restricts materialisation to the named entry."""
-    two_entries = _NETFLIX_YAML + """
+    two_entries = (
+        _NETFLIX_YAML
+        + """
   - id: council
     description: Council tax
     amount: 210.00
@@ -155,6 +157,7 @@ async def test_materialise_recurring_service_filter_id(storage, coordinator):
     start_date: 2026-04-01
     end_date: 2026-04-01
 """
+    )
     storage.recurring_yaml_path.write_text(two_entries, encoding="utf-8")
     hass = _make_hass(storage, coordinator)
     call = _make_call(hass, {"recurring_id": "netflix"})

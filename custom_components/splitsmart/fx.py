@@ -137,9 +137,7 @@ class FxClient:
 
     # ---------------------------------------------------------------- private helpers
 
-    async def _read_cache(
-        self, from_ccy: str, to_ccy: str, date_iso: str
-    ) -> FxResult | None:
+    async def _read_cache(self, from_ccy: str, to_ccy: str, date_iso: str) -> FxResult | None:
         """Return the newest cache entry matching (from, to, requested_date), or None."""
         path = self._storage.fx_rates_path
         if not path.exists():
@@ -195,9 +193,7 @@ class FxClient:
             await fh.write(line)
             await fh.flush()
 
-    async def _fetch_with_retry(
-        self, from_ccy: str, to_ccy: str, date_iso: str
-    ) -> FxResult:
+    async def _fetch_with_retry(self, from_ccy: str, to_ccy: str, date_iso: str) -> FxResult:
         """Fetch from Frankfurter; one retry on transient error. Raises on failure."""
         url = _FRANKFURTER_URL.format(date=date_iso, from_ccy=from_ccy, to_ccy=to_ccy)
         session = async_get_clientsession(self._hass)
@@ -219,13 +215,15 @@ class FxClient:
                         body = await resp.text()
                         _LOGGER.warning(
                             "Frankfurter returned HTTP %d for %s→%s %s: %.200s",
-                            resp.status, from_ccy, to_ccy, date_iso, body,
+                            resp.status,
+                            from_ccy,
+                            to_ccy,
+                            date_iso,
+                            body,
                         )
                         # 4xx (not 404) is terminal — don't retry
                         if resp.status < 500:
-                            raise FxUnavailableError(
-                                f"Frankfurter returned HTTP {resp.status}"
-                            )
+                            raise FxUnavailableError(f"Frankfurter returned HTTP {resp.status}")
                         # 5xx — retryable
                         last_exc = FxUnavailableError(f"Frankfurter HTTP {resp.status}")
                         continue
@@ -235,7 +233,10 @@ class FxClient:
                     except Exception as exc:
                         _LOGGER.warning(
                             "FX ambiguous response body for %s→%s %s: %s",
-                            from_ccy, to_ccy, date_iso, exc,
+                            from_ccy,
+                            to_ccy,
+                            date_iso,
+                            exc,
                         )
                         last_exc = FxUnavailableError("Unparseable response from Frankfurter")
                         continue
@@ -244,7 +245,9 @@ class FxClient:
                     if not rates or to_ccy not in rates:
                         _LOGGER.warning(
                             "FX response missing rates key for %s→%s %s",
-                            from_ccy, to_ccy, date_iso,
+                            from_ccy,
+                            to_ccy,
+                            date_iso,
                         )
                         last_exc = FxUnavailableError("Missing 'rates' in Frankfurter response")
                         continue

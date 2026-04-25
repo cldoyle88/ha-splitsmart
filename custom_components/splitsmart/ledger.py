@@ -394,9 +394,7 @@ def build_expense_record(
     record_id = new_id(ID_PREFIX_EXPENSE)
     now = datetime.now(tz=UTC).astimezone().isoformat()
     amount_dec = Decimal(str(amount))
-    home_amount = float(
-        (amount_dec * fx_rate).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
-    )
+    home_amount = float((amount_dec * fx_rate).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP))
     return {
         "id": record_id,
         "created_at": now,
@@ -437,9 +435,7 @@ def build_settlement_record(
     record_id = new_id(ID_PREFIX_SETTLEMENT)
     now = datetime.now(tz=UTC).astimezone().isoformat()
     amount_dec = Decimal(str(amount))
-    home_amount = float(
-        (amount_dec * fx_rate).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP)
-    )
+    home_amount = float((amount_dec * fx_rate).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP))
     return {
         "id": record_id,
         "created_at": now,

@@ -243,9 +243,7 @@ async def test_both_attempts_timeout_no_cache_raises(tmp_path):
         patch("asyncio.sleep", new=AsyncMock()),
         pytest.raises(FxUnavailableError),
     ):
-        await client.get_rate(
-            date=dt.date(2026, 4, 15), from_currency="EUR", to_currency="GBP"
-        )
+        await client.get_rate(date=dt.date(2026, 4, 15), from_currency="EUR", to_currency="GBP")
 
 
 @pytest.mark.asyncio
@@ -285,9 +283,7 @@ async def test_http_404_raises_unsupported_currency(tmp_path):
         patch("custom_components.splitsmart.fx.async_get_clientsession", return_value=session_mock),
         pytest.raises(FxUnsupportedCurrencyError),
     ):
-        await client.get_rate(
-            date=dt.date(2026, 4, 15), from_currency="VND", to_currency="GBP"
-        )
+        await client.get_rate(date=dt.date(2026, 4, 15), from_currency="VND", to_currency="GBP")
 
 
 @pytest.mark.asyncio
@@ -310,9 +306,7 @@ async def test_http_404_no_retry(tmp_path):
         patch("custom_components.splitsmart.fx.async_get_clientsession", return_value=session_mock),
         pytest.raises(FxUnsupportedCurrencyError),
     ):
-        await client.get_rate(
-            date=dt.date(2026, 4, 15), from_currency="VND", to_currency="GBP"
-        )
+        await client.get_rate(date=dt.date(2026, 4, 15), from_currency="VND", to_currency="GBP")
 
     assert call_count == 1  # no retry
 
@@ -369,9 +363,7 @@ async def test_missing_rates_key_raises_unavailable(tmp_path):
         patch("asyncio.sleep", new=AsyncMock()),
         pytest.raises(FxUnavailableError),
     ):
-        await client.get_rate(
-            date=dt.date(2026, 4, 15), from_currency="EUR", to_currency="GBP"
-        )
+        await client.get_rate(date=dt.date(2026, 4, 15), from_currency="EUR", to_currency="GBP")
 
 
 # ------------------------------------------------------------------ last_successful_fetch
@@ -390,14 +382,20 @@ async def test_last_successful_fetch_returns_newest(tmp_path):
     client, storage = _make_client(tmp_path)
     _write_cache_row(
         storage,
-        from_ccy="EUR", to_ccy="GBP",
-        requested_date="2026-04-10", fx_date="2026-04-10", rate="0.85",
+        from_ccy="EUR",
+        to_ccy="GBP",
+        requested_date="2026-04-10",
+        fx_date="2026-04-10",
+        rate="0.85",
         fetched_at="2026-04-10T10:00:00+01:00",
     )
     _write_cache_row(
         storage,
-        from_ccy="USD", to_ccy="GBP",
-        requested_date="2026-04-14", fx_date="2026-04-14", rate="0.79",
+        from_ccy="USD",
+        to_ccy="GBP",
+        requested_date="2026-04-14",
+        fx_date="2026-04-14",
+        rate="0.79",
         fetched_at="2026-04-14T15:00:00+01:00",
     )
 

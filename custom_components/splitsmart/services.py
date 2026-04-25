@@ -265,9 +265,7 @@ async def _resolve_fx(
             "Provide fx_rate explicitly or choose a different currency."
         ) from exc
     except Exception as exc:
-        _LOGGER.error(
-            "FX lookup failed for %s→%s on %s", currency, home_currency, date
-        )
+        _LOGGER.error("FX lookup failed for %s→%s on %s", currency, home_currency, date)
         raise ServiceValidationError(
             f"FX rate for {date} {currency}→{home_currency} is not cached and "
             "Frankfurter is unreachable. Try again when connectivity returns, "
@@ -300,7 +298,8 @@ async def _resolve_fx(
             # The primary lookup succeeded; don't turn paranoia into a write failure.
             _LOGGER.debug(
                 "FX sanity guard skipped: today's rate lookup failed for %s→%s",
-                currency, home_currency,
+                currency,
+                home_currency,
             )
 
     return result.rate, result.fx_date.isoformat()

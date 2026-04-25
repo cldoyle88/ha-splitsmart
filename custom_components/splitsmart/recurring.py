@@ -38,9 +38,7 @@ WEEKDAYS = {
 def _valid_weekday(value: str) -> str:
     lower = str(value).lower()
     if lower not in WEEKDAYS:
-        raise vol.Invalid(
-            f"weekday must be one of {sorted(WEEKDAYS)}, got '{value}'"
-        )
+        raise vol.Invalid(f"weekday must be one of {sorted(WEEKDAYS)}, got '{value}'")
     return lower
 
 
@@ -168,6 +166,7 @@ def load_recurring(
 
     try:
         import yaml  # type: ignore[import]
+
         raw_text = path.read_text(encoding="utf-8")
         data = yaml.safe_load(raw_text)
     except Exception as err:
@@ -197,9 +196,7 @@ def load_recurring(
         try:
             validated = _RECURRING_ENTRY_SCHEMA(raw)
         except vol.Invalid as err:
-            _LOGGER.error(
-                "recurring.yaml: entry '%s' is invalid (%s) — skipping", entry_id, err
-            )
+            _LOGGER.error("recurring.yaml: entry '%s' is invalid (%s) — skipping", entry_id, err)
             continue
 
         # Participant check for paid_by
@@ -411,7 +408,8 @@ async def materialise_recurring(
             if (entry.id, date_iso) in existing_pairs:
                 _LOGGER.debug(
                     "Skipping duplicate recurring '%s' on %s (already in ledger)",
-                    entry.id, date_iso,
+                    entry.id,
+                    date_iso,
                 )
                 result.skipped_duplicate += 1
                 continue
@@ -432,7 +430,9 @@ async def materialise_recurring(
             except (FxUnavailableError, FxUnsupportedCurrencyError) as exc:
                 _LOGGER.warning(
                     "FX failure for recurring '%s' on %s: %s — skipping date",
-                    entry.id, date_iso, exc,
+                    entry.id,
+                    date_iso,
+                    exc,
                 )
                 result.skipped_fx_failure += 1
                 continue
@@ -472,7 +472,9 @@ async def materialise_recurring(
             except SplitsmartValidationError as err:
                 _LOGGER.warning(
                     "Recurring '%s' on %s failed validation: %s — skipping",
-                    entry.id, date_iso, err,
+                    entry.id,
+                    date_iso,
+                    err,
                 )
                 result.skipped_fx_failure += 1  # treat validation failures as skip
                 continue

@@ -194,8 +194,7 @@ async def test_resolve_fx_home_currency_with_explicit_rate_raises_exact_message(
     change without a breaking-change notice.
     """
     expected = (
-        "fx_rate provided for a home-currency entry. "
-        "Either remove fx_rate or change the currency."
+        "fx_rate provided for a home-currency entry. Either remove fx_rate or change the currency."
     )
     mock = MagicMock(spec=FxClient)
 

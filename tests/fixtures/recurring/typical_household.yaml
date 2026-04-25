@@ -1,0 +1,55 @@
+recurring:
+  - id: netflix
+    description: Netflix
+    amount: 15.99
+    currency: GBP
+    paid_by: u1
+    categories:
+      - name: Subscriptions
+        home_amount: 15.99
+        split:
+          method: equal
+          shares:
+            - {user_id: u1, value: 50}
+            - {user_id: u2, value: 50}
+    schedule:
+      kind: monthly
+      day: 15
+    start_date: 2026-01-15
+
+  - id: weekly_shop
+    description: Weekly grocery run
+    amount: 80.00
+    currency: GBP
+    paid_by: u1
+    categories:
+      - name: Groceries
+        home_amount: 80.00
+        split:
+          method: equal
+          shares:
+            - {user_id: u1, value: 50}
+            - {user_id: u2, value: 50}
+    schedule:
+      kind: weekly
+      weekday: saturday
+    start_date: 2026-01-03
+
+  - id: tv_licence
+    description: TV licence
+    amount: 169.50
+    currency: GBP
+    paid_by: u1
+    categories:
+      - name: Household
+        home_amount: 169.50
+        split:
+          method: equal
+          shares:
+            - {user_id: u1, value: 50}
+            - {user_id: u2, value: 50}
+    schedule:
+      kind: annually
+      month: 4
+      day: 1
+    start_date: 2026-04-01

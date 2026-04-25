@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import voluptuous as vol
@@ -20,6 +21,7 @@ from .const import (
     SERVICE_EDIT_EXPENSE,
     SERVICE_EDIT_SETTLEMENT,
     SERVICE_IMPORT_FILE,
+    SERVICE_MATERIALISE_RECURRING,
     SERVICE_PROMOTE_STAGING,
     SERVICE_SKIP_STAGING,
     SOURCE_STAGING,
@@ -33,6 +35,7 @@ from .const import (
     TOMBSTONE_EDIT,
     TOMBSTONE_PROMOTE,
 )
+from .fx import FxClient, FxUnsupportedCurrencyError
 from .importer import parse_file
 from .importer.dedup import partition_by_dedup
 from .importer.mapping import save_mapping
@@ -91,6 +94,8 @@ ADD_EXPENSE_SCHEMA = vol.Schema(
         vol.Optional("receipt_path"): vol.Any(None, cv.string),
         vol.Optional("source", default="manual"): vol.In(list(SOURCES)),
         vol.Optional("staging_id"): vol.Any(None, cv.string),
+        vol.Optional("fx_rate"): vol.All(vol.Coerce(float), vol.Range(min=0.000001)),
+        vol.Optional("fx_date"): cv.date,
     }
 )
 
@@ -102,6 +107,8 @@ ADD_SETTLEMENT_SCHEMA = vol.Schema(
         vol.Required("amount"): vol.All(vol.Coerce(float), vol.Range(min=0.01)),
         vol.Optional("currency"): vol.All(cv.string, vol.Length(min=3, max=3)),
         vol.Optional("notes"): vol.Any(None, cv.string),
+        vol.Optional("fx_rate"): vol.All(vol.Coerce(float), vol.Range(min=0.000001)),
+        vol.Optional("fx_date"): cv.date,
     }
 )
 
@@ -149,6 +156,10 @@ PROMOTE_STAGING_SCHEMA = vol.Schema(
         vol.Optional("override_description"): vol.Any(None, cv.string),
         vol.Optional("override_date"): vol.Any(None, cv.date),
         vol.Optional("reason"): vol.Any(None, cv.string),
+        # FX overrides — bypass the Frankfurter lookup when the caller already
+        # knows the correct rate (e.g. M3-staged rows re-promoted with explicit rate).
+        vol.Optional("fx_rate"): vol.All(vol.Coerce(float), vol.Range(min=0.000001)),
+        vol.Optional("fx_date"): cv.date,
     }
 )
 
@@ -201,14 +212,97 @@ def _resolve_caller(call: ServiceCall, participants: list[str]) -> str:
     return caller
 
 
-def _guard_currency(currency: str, home_currency: str) -> None:
-    """Reject foreign-currency entries until FX support lands in M4."""
-    if currency != home_currency:
+def _get_fx_client(hass: HomeAssistant) -> FxClient:
+    domain_data = hass.data.get(DOMAIN, {})
+    if not domain_data:
+        raise ServiceValidationError("Splitsmart integration is not loaded")
+    entry_data = next(iter(domain_data.values()))
+    return entry_data["fx"]
+
+
+async def _resolve_fx(
+    fx_client: FxClient,
+    *,
+    currency: str,
+    home_currency: str,
+    date: str,
+    explicit_rate: float | None,
+    explicit_fx_date: str | None,
+) -> tuple[Decimal, str]:
+    """Return (rate, fx_date_iso) for the write.
+
+    Raises ServiceValidationError with a stable message on any FX failure so
+    callers (UI, automations, Developer Tools) can surface it directly.
+    """
+    if currency == home_currency and explicit_rate is not None:
         raise ServiceValidationError(
-            f"Foreign-currency entries ('{currency}') are not yet supported. "
-            "Multi-currency support arrives in M4. Use the home currency "
-            f"'{home_currency}' for now."
+            "fx_rate provided for a home-currency entry. "
+            "Either remove fx_rate or change the currency."
         )
+
+    if currency == home_currency:
+        return Decimal("1"), date
+
+    if explicit_rate is not None:
+        fx_date_str = explicit_fx_date.isoformat() if explicit_fx_date else date
+        return Decimal(str(explicit_rate)), fx_date_str
+
+    # Live lookup via cache → Frankfurter
+    import datetime as _dt
+
+    expense_date = _dt.date.fromisoformat(date)
+    today = _dt.date.today()
+
+    try:
+        result = await fx_client.get_rate(
+            date=expense_date,
+            from_currency=currency,
+            to_currency=home_currency,
+        )
+    except FxUnsupportedCurrencyError as exc:
+        raise ServiceValidationError(
+            f"Currency '{currency}' is not supported by the FX provider. "
+            "Provide fx_rate explicitly or choose a different currency."
+        ) from exc
+    except Exception as exc:
+        _LOGGER.error("FX lookup failed for %s→%s on %s", currency, home_currency, date)
+        raise ServiceValidationError(
+            f"FX rate for {date} {currency}→{home_currency} is not cached and "
+            "Frankfurter is unreachable. Try again when connectivity returns, "
+            "or provide fx_rate explicitly."
+        ) from exc
+
+    # Sanity guard: compare resolved rate to today's rate when the date is
+    # within ±365 days. Skipped for older dates — rates can legitimately differ
+    # by more than 50% over longer periods.
+    if abs((today - expense_date).days) <= 365:
+        try:
+            today_result = await fx_client.get_rate(
+                date=today,
+                from_currency=currency,
+                to_currency=home_currency,
+            )
+            today_rate = today_result.rate
+            if today_rate and today_rate != 0:
+                ratio = result.rate / today_rate
+                if ratio > Decimal("1.5") or ratio < Decimal("2") / Decimal("3"):
+                    raise ServiceValidationError(
+                        f"Resolved FX rate {result.rate} for {currency}→{home_currency} "
+                        f"on {date} diverges by more than 50% from today's rate "
+                        f"{today_rate}. If this is intentional, provide fx_rate explicitly."
+                    )
+        except ServiceValidationError:
+            raise
+        except Exception:
+            # Today's lookup failed — swallow and skip the guard.
+            # The primary lookup succeeded; don't turn paranoia into a write failure.
+            _LOGGER.debug(
+                "FX sanity guard skipped: today's rate lookup failed for %s→%s",
+                currency,
+                home_currency,
+            )
+
+    return result.rate, result.fx_date.isoformat()
 
 
 def _find_live_staging_row(coordinator: Any, staging_id: str, caller: str) -> dict[str, Any]:
@@ -244,9 +338,17 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
     caller = _resolve_caller(call, participants)
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     record = build_expense_record(
         date=date_str,
         description=data["description"],
@@ -260,6 +362,8 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
         staging_id=data.get("staging_id"),
         receipt_path=data.get("receipt_path"),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -284,9 +388,17 @@ async def _handle_add_settlement(call: ServiceCall) -> dict[str, Any]:
     caller = _resolve_caller(call, participants)
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     record = build_settlement_record(
         date=date_str,
         from_user=data["from_user"],
@@ -296,6 +408,8 @@ async def _handle_add_settlement(call: ServiceCall) -> dict[str, Any]:
         home_currency=home_currency,
         notes=data.get("notes"),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -331,9 +445,17 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
         raise ServiceValidationError(f"Expense '{target_id}' not found")
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     new_record = build_expense_record(
         date=date_str,
         description=data["description"],
@@ -350,6 +472,8 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
         # having to re-send the receipt path for trivial edits.
         receipt_path=data.get("receipt_path", existing.get("receipt_path")),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -425,9 +549,17 @@ async def _handle_edit_settlement(call: ServiceCall) -> dict[str, Any]:
         raise ServiceValidationError(f"Settlement '{target_id}' not found")
 
     currency = data.get("currency", home_currency)
-    _guard_currency(currency, home_currency)
-
     date_str = data["date"].isoformat()
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     new_record = build_settlement_record(
         date=date_str,
         from_user=data["from_user"],
@@ -437,6 +569,8 @@ async def _handle_edit_settlement(call: ServiceCall) -> dict[str, Any]:
         home_currency=home_currency,
         notes=data.get("notes"),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -504,12 +638,6 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
     staging_id: str = data["staging_id"]
     staging_row = _find_live_staging_row(coordinator, staging_id, caller)
 
-    # O4 foreign-currency guard: surface the user-facing message verbatim
-    # per M3_PLAN §8. The staging row stays live — the user retries once
-    # FX support ships in M4.
-    if staging_row["currency"] != home_currency:
-        raise ServiceValidationError("Foreign currency promotion arrives in M4. Row stays staged.")
-
     description: str = data.get("override_description") or staging_row["description"]
     date_value = data.get("override_date")
     date_str: str = date_value.isoformat() if date_value else staging_row["date"]
@@ -522,12 +650,23 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
             f"'paid_by' user {data['paid_by']!r} is not a configured participant"
         )
 
+    currency = staging_row["currency"]
+    explicit_fx_date = data.get("fx_date")
+    fx_rate, fx_date_str = await _resolve_fx(
+        _get_fx_client(call.hass),
+        currency=currency,
+        home_currency=home_currency,
+        date=date_str,
+        explicit_rate=data.get("fx_rate"),
+        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+    )
+
     new_expense = build_expense_record(
         date=date_str,
         description=description,
         paid_by=data["paid_by"],
         amount=float(staging_row["amount"]),
-        currency=staging_row["currency"],
+        currency=currency,
         home_currency=home_currency,
         categories=data["categories"],
         notes=data.get("notes"),
@@ -535,6 +674,8 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
         staging_id=staging_id,
         receipt_path=data.get("receipt_path", staging_row.get("receipt_path")),
         created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
     )
 
     try:
@@ -730,6 +871,63 @@ async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
     return response
 
 
+# ------------------------------------------------------------------ materialise_recurring
+
+
+MATERIALISE_RECURRING_SCHEMA = vol.Schema(
+    {
+        vol.Optional("recurring_id"): vol.All(str, vol.Length(min=1)),
+    }
+)
+
+
+async def _handle_materialise_recurring(call: ServiceCall) -> dict[str, Any]:
+    """Run recurring materialisation on demand, optionally for a single entry."""
+    from .recurring import load_recurring, load_recurring_state, materialise_recurring
+
+    data = MATERIALISE_RECURRING_SCHEMA(dict(call.data))
+    filter_id: str | None = data.get("recurring_id")
+
+    storage, coordinator, participants, home_currency, known_categories = _get_entry_data(call.hass)
+    fx_client = _get_fx_client(call.hass)
+
+    recurring_entries = load_recurring(
+        storage.recurring_yaml_path,
+        participants=list(participants),
+    )
+
+    if filter_id is not None:
+        ids = {e.id for e in recurring_entries}
+        if filter_id not in ids:
+            raise ServiceValidationError(
+                f"No recurring entry with id '{filter_id}' found in recurring.yaml"
+            )
+
+    state = await load_recurring_state(storage.recurring_state_path)
+    existing_expenses = await storage.read_all(storage.expenses_path)
+
+    result = await materialise_recurring(
+        entries=recurring_entries,
+        state=state,
+        existing_expenses=existing_expenses,
+        fx_client=fx_client,
+        home_currency=home_currency,
+        participants=set(participants),
+        known_categories=known_categories,
+        storage=storage,
+        filter_id=filter_id,
+    )
+
+    if result.materialised:
+        await coordinator.async_refresh()
+
+    return {
+        "materialised": result.materialised,
+        "skipped_fx_failure": result.skipped_fx_failure,
+        "skipped_duplicate": result.skipped_duplicate,
+    }
+
+
 # ------------------------------------------------------------------ registration
 
 
@@ -798,6 +996,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         schema=None,
         supports_response=SupportsResponse.OPTIONAL,
     )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_MATERIALISE_RECURRING,
+        _handle_materialise_recurring,
+        schema=None,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
     _LOGGER.debug("Splitsmart services registered")
 
 
@@ -813,6 +1018,7 @@ def async_unregister_services(hass: HomeAssistant) -> None:
         SERVICE_PROMOTE_STAGING,
         SERVICE_SKIP_STAGING,
         SERVICE_IMPORT_FILE,
+        SERVICE_MATERIALISE_RECURRING,
     ):
         hass.services.async_remove(DOMAIN, service)
     _LOGGER.debug("Splitsmart services deregistered")

@@ -63,10 +63,31 @@ async def coordinator(storage: SplitsmartStorage) -> SplitsmartCoordinator:
     return coord
 
 
+def _make_mock_fx_client(storage: SplitsmartStorage) -> MagicMock:
+    """Return a mock FxClient that raises FxUnavailableError for any foreign-currency lookup.
+
+    All home-currency (GBP) tests go through the same-currency shortcut in
+    _resolve_fx and never touch the FxClient, so this mock is only exercised by
+    tests that explicitly pass a foreign currency.
+    """
+    from custom_components.splitsmart.fx import FxClient, FxUnavailableError
+
+    mock = MagicMock(spec=FxClient)
+    mock.get_rate = AsyncMock(side_effect=FxUnavailableError("mock: network unavailable"))
+    return mock
+
+
 def _make_hass(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator) -> MagicMock:
     hass = MagicMock()
     hass.data = {
-        DOMAIN: {"test_entry": {"storage": storage, "coordinator": coordinator, "entry": None}}
+        DOMAIN: {
+            "test_entry": {
+                "storage": storage,
+                "coordinator": coordinator,
+                "fx": _make_mock_fx_client(storage),
+                "entry": None,
+            }
+        }
     }
     return hass
 
@@ -146,15 +167,19 @@ async def test_add_expense_monthly_spending_attributes(
     assert result["by_category"]["Groceries"] == Decimal("27.60")
 
 
-async def test_add_expense_foreign_currency_rejected(
+async def test_add_expense_foreign_currency_network_down(
     storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
 ):
+    """When the FX client is unavailable, add_expense with a foreign currency fails.
+
+    The M3 hard block is gone in M4; the failure now comes from the FX lookup.
+    """
     from homeassistant.exceptions import ServiceValidationError
 
     hass = _make_hass(storage, coordinator)
     data = _tesco_data()
     data["currency"] = "USD"
-    with pytest.raises(ServiceValidationError, match="M4"):
+    with pytest.raises(ServiceValidationError, match="Frankfurter"):
         await _handle_add_expense(_make_call(hass, data))
 
 
@@ -539,20 +564,18 @@ async def test_promote_staging_other_user_permission_denied(
         )
 
 
-async def test_promote_staging_foreign_currency_row_rejected_with_user_message(
+async def test_promote_staging_foreign_currency_fx_unavailable_row_stays_staged(
     storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
 ):
-    """Per O4 decision — the row stays staged; the message is the
-    verbatim user-facing copy in M3_PLAN §8."""
+    """M4: the M3 hard block is gone. Promotion of a EUR row now goes through the
+    FX cascade. When the network is down and the cache is empty, the write is
+    rejected and the staging row stays live."""
     row = await _seed_staging_row(storage, coordinator, currency="EUR")
-    hass = _make_hass(storage, coordinator)
+    hass = _make_hass(storage, coordinator)  # mock FxClient raises FxUnavailableError
 
     from homeassistant.exceptions import ServiceValidationError
 
-    with pytest.raises(
-        ServiceValidationError,
-        match=r"Foreign currency promotion arrives in M4\. Row stays staged\.",
-    ):
+    with pytest.raises(ServiceValidationError, match="Frankfurter"):
         await _handle_promote_staging(_make_call(hass, _waitrose_promote_payload(row["id"])))
 
     # Row remains live: no tombstone, still in staging_by_user.

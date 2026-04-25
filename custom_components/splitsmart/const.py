@@ -35,6 +35,9 @@ EXPENSES_FILE = "expenses.jsonl"
 SETTLEMENTS_FILE = "settlements.jsonl"
 TOMBSTONES_FILE = "tombstones.jsonl"
 MAPPINGS_FILE = "mappings.jsonl"
+FX_RATES_FILE = "fx_rates.jsonl"
+RECURRING_YAML_FILE = "recurring.yaml"
+RECURRING_STATE_FILE = "recurring_state.jsonl"
 
 # JSONL record id prefixes
 ID_PREFIX_EXPENSE = "ex"
@@ -42,6 +45,7 @@ ID_PREFIX_SETTLEMENT = "sl"
 ID_PREFIX_TOMBSTONE = "tb"
 ID_PREFIX_STAGING = "st"
 ID_PREFIX_RULE = "r"
+ID_PREFIX_RECURRING_STATE = "rs"
 
 # Split methods
 SPLIT_METHOD_EQUAL = "equal"
@@ -85,6 +89,8 @@ SERVICE_DELETE_SETTLEMENT = "delete_settlement"
 SERVICE_IMPORT_FILE = "import_file"
 SERVICE_PROMOTE_STAGING = "promote_staging"
 SERVICE_SKIP_STAGING = "skip_staging"
+# M4 services
+SERVICE_MATERIALISE_RECURRING = "materialise_recurring"
 
 # Coordinator
 COORDINATOR_UPDATE_INTERVAL_MINUTES = 5

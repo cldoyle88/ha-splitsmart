@@ -69,6 +69,18 @@ async def test_ensure_layout_creates_dirs(tmp_path: pathlib.Path):
 
 
 @pytest.mark.asyncio
+async def test_ensure_layout_creates_m4_files(tmp_path: pathlib.Path):
+    root = tmp_path / "splitsmart"
+    storage = SplitsmartStorage(root)
+    await storage.ensure_layout()
+    # JSONL seed files must exist (so readers never have to handle absence)
+    assert storage.fx_rates_path.exists()
+    assert storage.recurring_state_path.exists()
+    # recurring.yaml must NOT be auto-created — absence means "no recurrings"
+    assert not storage.recurring_yaml_path.exists()
+
+
+@pytest.mark.asyncio
 async def test_ensure_layout_is_idempotent(tmp_path: pathlib.Path):
     root = tmp_path / "splitsmart"
     storage = SplitsmartStorage(root)
@@ -95,6 +107,11 @@ def test_path_helpers(tmp_path: pathlib.Path):
     assert storage.upload_path("abcd-1234", "csv").name == "abcd-1234.csv"
     # Extension normalisation: strip leading dot, lower-case.
     assert storage.upload_path("abcd-1234", ".XLSX").name == "abcd-1234.xlsx"
+
+    # M4 additions
+    assert storage.fx_rates_path.name == "fx_rates.jsonl"
+    assert storage.recurring_yaml_path.name == "recurring.yaml"
+    assert storage.recurring_state_path.name == "recurring_state.jsonl"
 
 
 # ------------------------------------------------------------------ append + read_all

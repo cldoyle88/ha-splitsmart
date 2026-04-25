@@ -380,11 +380,21 @@ def build_expense_record(
     staging_id: str | None,
     receipt_path: str | None,
     created_by: str,
+    fx_rate: Decimal = Decimal("1"),
+    fx_date: str | None = None,
+    recurring_id: str | None = None,
 ) -> dict[str, Any]:
     """Build a fully-populated expense dict ready for disk.
-    M1: currency must equal home_currency; fx_rate=1.0, home_amount=amount."""
+
+    ``fx_rate`` and ``fx_date`` are resolved by the caller via ``_resolve_fx``
+    before this function is called. Home-currency writes pass the defaults.
+    The float boundary: ``fx_rate`` is Decimal inside this function; stored as
+    float to match the M1 on-disk schema.
+    """
     record_id = new_id(ID_PREFIX_EXPENSE)
     now = datetime.now(tz=UTC).astimezone().isoformat()
+    amount_dec = Decimal(str(amount))
+    home_amount = float((amount_dec * fx_rate).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP))
     return {
         "id": record_id,
         "created_at": now,
@@ -394,13 +404,14 @@ def build_expense_record(
         "paid_by": paid_by,
         "amount": round(amount, 2),
         "currency": currency,
-        "home_amount": round(amount, 2),
+        "home_amount": home_amount,
         "home_currency": home_currency,
-        "fx_rate": 1.0,
-        "fx_date": date,
+        "fx_rate": float(fx_rate),
+        "fx_date": fx_date or date,
         "categories": categories,
         "source": source,
         "staging_id": staging_id,
+        "recurring_id": recurring_id,
         "receipt_path": receipt_path,
         "notes": notes,
         "comments": [],
@@ -417,10 +428,14 @@ def build_settlement_record(
     home_currency: str,
     notes: str | None,
     created_by: str,
+    fx_rate: Decimal = Decimal("1"),
+    fx_date: str | None = None,
 ) -> dict[str, Any]:
     """Build a fully-populated settlement dict ready for disk."""
     record_id = new_id(ID_PREFIX_SETTLEMENT)
     now = datetime.now(tz=UTC).astimezone().isoformat()
+    amount_dec = Decimal(str(amount))
+    home_amount = float((amount_dec * fx_rate).quantize(_TWO_PLACES, rounding=ROUND_HALF_UP))
     return {
         "id": record_id,
         "created_at": now,
@@ -430,6 +445,8 @@ def build_settlement_record(
         "to_user": to_user,
         "amount": round(amount, 2),
         "currency": currency,
-        "home_amount": round(amount, 2),
+        "home_amount": home_amount,
+        "fx_rate": float(fx_rate),
+        "fx_date": fx_date or date,
         "notes": notes,
     }

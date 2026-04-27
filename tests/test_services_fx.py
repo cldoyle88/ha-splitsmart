@@ -357,6 +357,54 @@ async def test_add_expense_gbp_categories_unchanged_by_rescale(
 # ------------------------------------------------------------------ edit_expense
 
 
+async def test_promote_staging_explicit_fx_date_as_string(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """Regression: Pi QA M4.2 Bug A.
+
+    Developer Tools sends fx_date as a plain string ("2026-04-17"). cv.date in the
+    schema coerces it to datetime.date, but handlers previously called .isoformat()
+    before passing to _resolve_fx, which then called .isoformat() again on the str —
+    AttributeError: 'str' object has no attribute 'isoformat'.
+
+    After fix: explicit_fx_date reaches _resolve_fx as datetime.date, .isoformat()
+    succeeds, and the promote completes without error.
+    """
+    row = await _seed_eur_staging_row(storage, coordinator, amount=10.00)
+    hass = _make_hass(storage, coordinator, fx_rate="0.869")
+
+    result = await _handle_promote_staging(
+        _make_call(
+            hass,
+            {
+                "staging_id": row["id"],
+                "paid_by": "u1",
+                # fx_date supplied as a plain string — Developer Tools equivalent.
+                # cv.date coerces it to datetime.date before the handler runs.
+                "fx_date": "2026-04-17",
+                "fx_rate": 0.869,
+                "categories": [
+                    {
+                        "name": "Groceries",
+                        "home_amount": 10.00,
+                        "split": {
+                            "method": "equal",
+                            "shares": [
+                                {"user_id": "u1", "value": 50},
+                                {"user_id": "u2", "value": 50},
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+    )
+
+    assert result["expense_id"].startswith("ex_")
+    expense = coordinator.data.expenses[0]
+    assert expense["fx_date"] == "2026-04-17"
+
+
 async def test_edit_expense_eur_rescales_categories(
     storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
 ):

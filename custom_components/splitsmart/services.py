@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -228,7 +228,7 @@ async def _resolve_fx(
     home_currency: str,
     date: str,
     explicit_rate: float | None,
-    explicit_fx_date: str | None,
+    explicit_fx_date: date | None,
 ) -> tuple[Decimal, str]:
     """Return (rate, fx_date_iso) for the write.
 
@@ -340,14 +340,13 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
 
     currency = data.get("currency", home_currency)
     date_str = data["date"].isoformat()
-    explicit_fx_date = data.get("fx_date")
     fx_rate, fx_date_str = await _resolve_fx(
         _get_fx_client(call.hass),
         currency=currency,
         home_currency=home_currency,
         date=date_str,
         explicit_rate=data.get("fx_rate"),
-        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+        explicit_fx_date=data.get("fx_date"),
     )
 
     total_home = (Decimal(str(data["amount"])) * fx_rate).quantize(
@@ -393,14 +392,13 @@ async def _handle_add_settlement(call: ServiceCall) -> dict[str, Any]:
 
     currency = data.get("currency", home_currency)
     date_str = data["date"].isoformat()
-    explicit_fx_date = data.get("fx_date")
     fx_rate, fx_date_str = await _resolve_fx(
         _get_fx_client(call.hass),
         currency=currency,
         home_currency=home_currency,
         date=date_str,
         explicit_rate=data.get("fx_rate"),
-        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+        explicit_fx_date=data.get("fx_date"),
     )
 
     record = build_settlement_record(
@@ -450,14 +448,13 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
 
     currency = data.get("currency", home_currency)
     date_str = data["date"].isoformat()
-    explicit_fx_date = data.get("fx_date")
     fx_rate, fx_date_str = await _resolve_fx(
         _get_fx_client(call.hass),
         currency=currency,
         home_currency=home_currency,
         date=date_str,
         explicit_rate=data.get("fx_rate"),
-        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+        explicit_fx_date=data.get("fx_date"),
     )
 
     total_home = (Decimal(str(data["amount"])) * fx_rate).quantize(
@@ -557,14 +554,13 @@ async def _handle_edit_settlement(call: ServiceCall) -> dict[str, Any]:
 
     currency = data.get("currency", home_currency)
     date_str = data["date"].isoformat()
-    explicit_fx_date = data.get("fx_date")
     fx_rate, fx_date_str = await _resolve_fx(
         _get_fx_client(call.hass),
         currency=currency,
         home_currency=home_currency,
         date=date_str,
         explicit_rate=data.get("fx_rate"),
-        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+        explicit_fx_date=data.get("fx_date"),
     )
 
     new_record = build_settlement_record(
@@ -658,14 +654,13 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
         )
 
     currency = staging_row["currency"]
-    explicit_fx_date = data.get("fx_date")
     fx_rate, fx_date_str = await _resolve_fx(
         _get_fx_client(call.hass),
         currency=currency,
         home_currency=home_currency,
         date=date_str,
         explicit_rate=data.get("fx_rate"),
-        explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
+        explicit_fx_date=data.get("fx_date"),
     )
 
     source_amount = float(staging_row["amount"])

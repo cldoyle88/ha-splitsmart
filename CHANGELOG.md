@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed – M4.2 hotfix (2026-04-27)
+
+**Bug A – `_resolve_fx` AttributeError on explicit `fx_date`**
+- All service handlers were calling `.isoformat()` on the `datetime.date`
+  from `cv.date` before passing it to `_resolve_fx`, which then called
+  `.isoformat()` again on the resulting string.
+- Fix: callers now pass the `datetime.date` object directly; `_resolve_fx`
+  retains its `.isoformat()` call and its parameter type is updated to
+  `date | None`.
+
+**Bug B – unhandled exceptions surfaced as "Unknown error"**
+- Any unexpected exception that escaped a service handler was wrapped by HA
+  as the opaque `unknown_error` code with no actionable message.
+- Fix: `_service_guard` decorator on every handler catches unexpected
+  exceptions, logs the full traceback at ERROR, and re-raises as
+  `ServiceValidationError("Internal error in <service>: …")`.
+  `ServiceValidationError`, `HomeAssistantError`, and `vol.Invalid` pass
+  through unchanged.
+
+**Bug C – blocking I/O in `load_recurring`**
+- `load_recurring` called `path.read_text()` synchronously inside the event
+  loop; under SD card I/O latency this stalled other integrations.
+- Fix: converted to `async def`, using `aiofiles.open` / `await fh.read()`
+  to match the pattern used by `load_recurring_state`. Both callers
+  (`__init__.py` daily materialiser and `services.py` on-demand handler)
+  updated to `await`.
+
 ### Added – M4 FX and Recurring Bills (2026-04-24)
 
 **FX client and cache (`fx.py`)**

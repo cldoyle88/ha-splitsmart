@@ -149,7 +149,7 @@ class RecurringEntry:
 # ------------------------------------------------------------------ loader
 
 
-def load_recurring(
+async def load_recurring(
     path: pathlib.Path,
     *,
     participants: list[str],
@@ -167,7 +167,8 @@ def load_recurring(
     try:
         import yaml  # type: ignore[import]
 
-        raw_text = path.read_text(encoding="utf-8")
+        async with aiofiles.open(path, encoding="utf-8") as fh:
+            raw_text = await fh.read()
         data = yaml.safe_load(raw_text)
     except Exception as err:
         _LOGGER.error("Failed to parse recurring.yaml: %s", err)

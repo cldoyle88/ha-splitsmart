@@ -941,7 +941,7 @@ async def _handle_materialise_recurring(call: ServiceCall) -> dict[str, Any]:
     storage, coordinator, participants, home_currency, known_categories = _get_entry_data(call.hass)
     fx_client = _get_fx_client(call.hass)
 
-    recurring_entries = load_recurring(
+    recurring_entries = await load_recurring(
         storage.recurring_yaml_path,
         participants=list(participants),
     )

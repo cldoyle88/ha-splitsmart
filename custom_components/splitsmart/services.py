@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 import voluptuous as vol
@@ -45,6 +45,7 @@ from .ledger import (
     SplitsmartValidationError,
     build_expense_record,
     build_settlement_record,
+    rescale_categories,
     validate_expense_record,
     validate_settlement_record,
 )
@@ -349,6 +350,9 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
         explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
     )
 
+    total_home = (Decimal(str(data["amount"])) * fx_rate).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
     record = build_expense_record(
         date=date_str,
         description=data["description"],
@@ -356,7 +360,7 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
         amount=data["amount"],
         currency=currency,
         home_currency=home_currency,
-        categories=data["categories"],
+        categories=rescale_categories(data["categories"], fx_rate, total_home),
         notes=data.get("notes"),
         source=data.get("source", "manual"),
         staging_id=data.get("staging_id"),
@@ -456,6 +460,9 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
         explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
     )
 
+    total_home = (Decimal(str(data["amount"])) * fx_rate).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
     new_record = build_expense_record(
         date=date_str,
         description=data["description"],
@@ -463,7 +470,7 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
         amount=data["amount"],
         currency=currency,
         home_currency=home_currency,
-        categories=data["categories"],
+        categories=rescale_categories(data["categories"], fx_rate, total_home),
         notes=data.get("notes"),
         source=existing.get("source", "manual"),
         staging_id=existing.get("staging_id"),
@@ -661,14 +668,18 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
         explicit_fx_date=explicit_fx_date.isoformat() if explicit_fx_date else None,
     )
 
+    source_amount = float(staging_row["amount"])
+    total_home = (Decimal(str(source_amount)) * fx_rate).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
     new_expense = build_expense_record(
         date=date_str,
         description=description,
         paid_by=data["paid_by"],
-        amount=float(staging_row["amount"]),
+        amount=source_amount,
         currency=currency,
         home_currency=home_currency,
-        categories=data["categories"],
+        categories=rescale_categories(data["categories"], fx_rate, total_home),
         notes=data.get("notes"),
         source=SOURCE_STAGING,
         staging_id=staging_id,

@@ -363,6 +363,35 @@ def validate_settlement_record(
         raise SplitsmartValidationError(f"Settlement home_amount must be positive, got {amount}.")
 
 
+# ------------------------------------------------------------------ FX rescaling
+
+
+def rescale_categories(
+    categories: list[dict[str, Any]],
+    fx_rate: Decimal,
+    total_home: Decimal,
+) -> list[dict[str, Any]]:
+    """Return a new category list with home_amounts rescaled by fx_rate.
+
+    Category home_amounts are treated as source-currency amounts. The last
+    allocation absorbs rounding drift so sum(home_amounts) == total_home exactly.
+    Splits are unchanged (dimensionless). For home-currency writes (fx_rate == 1)
+    this is a no-op apart from the 2dp normalisation.
+    """
+    _cent = Decimal("0.01")
+    rescaled: list[dict[str, Any]] = []
+    running_sum = Decimal("0")
+    for i, alloc in enumerate(categories):
+        if i == len(categories) - 1:
+            home_amount = float((total_home - running_sum).quantize(_cent, rounding=ROUND_HALF_UP))
+        else:
+            raw_home = Decimal(str(alloc["home_amount"])) * fx_rate
+            home_amount = float(raw_home.quantize(_cent, rounding=ROUND_HALF_UP))
+            running_sum += Decimal(str(home_amount))
+        rescaled.append({**alloc, "home_amount": home_amount})
+    return rescaled
+
+
 # ------------------------------------------------------------------ record builders
 
 

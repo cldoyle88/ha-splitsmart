@@ -9,7 +9,7 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
-from homeassistant.exceptions import ServiceValidationError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import config_validation as cv
 
 from .const import (
@@ -330,9 +330,44 @@ def _find_live_staging_row(coordinator: Any, staging_id: str, caller: str) -> di
     raise ServiceValidationError(f"Staging row '{staging_id}' not found")
 
 
+# ------------------------------------------------------------------ error guard
+
+
+def _service_guard(service_name: str):
+    """Decorator that converts unhandled exceptions to ServiceValidationError.
+
+    ServiceValidationError, HomeAssistantError, and vol.Invalid already carry
+    user-readable messages and pass through unchanged. Everything else becomes
+    a structured bug-report prompt so callers never see HA's generic
+    "Unknown error (unknown_error)".
+    """
+    from collections.abc import Callable
+    from functools import wraps
+
+    def decorator(fn: Callable) -> Callable:
+        @wraps(fn)
+        async def wrapper(call: ServiceCall) -> dict[str, Any]:
+            try:
+                return await fn(call)
+            except (ServiceValidationError, HomeAssistantError, vol.Invalid):
+                raise
+            except Exception as err:
+                _LOGGER.error(
+                    "Internal error in %s: %s", service_name, err, exc_info=True
+                )
+                raise ServiceValidationError(
+                    f"Internal error in {service_name}: {err}. Please report this as a bug."
+                ) from err
+
+        return wrapper
+
+    return decorator
+
+
 # ------------------------------------------------------------------ handlers
 
 
+@_service_guard("add_expense")
 async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
     data = ADD_EXPENSE_SCHEMA(dict(call.data))
     storage, coordinator, participants, home_currency, known_cats = _get_entry_data(call.hass)
@@ -385,6 +420,7 @@ async def _handle_add_expense(call: ServiceCall) -> dict[str, Any]:
     return {"id": record["id"]}
 
 
+@_service_guard("add_settlement")
 async def _handle_add_settlement(call: ServiceCall) -> dict[str, Any]:
     data = ADD_SETTLEMENT_SCHEMA(dict(call.data))
     storage, coordinator, participants, home_currency, _ = _get_entry_data(call.hass)
@@ -429,6 +465,7 @@ async def _handle_add_settlement(call: ServiceCall) -> dict[str, Any]:
     return {"id": record["id"]}
 
 
+@_service_guard("edit_expense")
 async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
     data = EDIT_EXPENSE_SCHEMA(dict(call.data))
     storage, coordinator, participants, home_currency, known_cats = _get_entry_data(call.hass)
@@ -505,6 +542,7 @@ async def _handle_edit_expense(call: ServiceCall) -> dict[str, Any]:
     return {"id": new_record["id"]}
 
 
+@_service_guard("delete_expense")
 async def _handle_delete_expense(call: ServiceCall) -> dict[str, Any]:
     data = DELETE_EXPENSE_SCHEMA(dict(call.data))
     storage, coordinator, participants, _, _ = _get_entry_data(call.hass)
@@ -535,6 +573,7 @@ async def _handle_delete_expense(call: ServiceCall) -> dict[str, Any]:
     return {"id": target_id}
 
 
+@_service_guard("edit_settlement")
 async def _handle_edit_settlement(call: ServiceCall) -> dict[str, Any]:
     data = EDIT_SETTLEMENT_SCHEMA(dict(call.data))
     storage, coordinator, participants, home_currency, _ = _get_entry_data(call.hass)
@@ -600,6 +639,7 @@ async def _handle_edit_settlement(call: ServiceCall) -> dict[str, Any]:
     return {"id": new_record["id"]}
 
 
+@_service_guard("delete_settlement")
 async def _handle_delete_settlement(call: ServiceCall) -> dict[str, Any]:
     data = DELETE_SETTLEMENT_SCHEMA(dict(call.data))
     storage, coordinator, participants, _, _ = _get_entry_data(call.hass)
@@ -633,6 +673,7 @@ async def _handle_delete_settlement(call: ServiceCall) -> dict[str, Any]:
 # ---- M3 staging handlers ----
 
 
+@_service_guard("promote_staging")
 async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
     data = PROMOTE_STAGING_SCHEMA(dict(call.data))
     storage, coordinator, participants, home_currency, known_cats = _get_entry_data(call.hass)
@@ -714,6 +755,7 @@ async def _handle_promote_staging(call: ServiceCall) -> dict[str, Any]:
     return {"expense_id": new_expense["id"], "staging_id": staging_id}
 
 
+@_service_guard("skip_staging")
 async def _handle_skip_staging(call: ServiceCall) -> dict[str, Any]:
     data = SKIP_STAGING_SCHEMA(dict(call.data))
     storage, coordinator, participants, _, _ = _get_entry_data(call.hass)
@@ -778,6 +820,7 @@ def _find_upload_path(storage: Any, upload_id: str) -> Any:
     )
 
 
+@_service_guard("import_file")
 async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
     from .importer import inspect_file
 
@@ -887,6 +930,7 @@ MATERIALISE_RECURRING_SCHEMA = vol.Schema(
 )
 
 
+@_service_guard("materialise_recurring")
 async def _handle_materialise_recurring(call: ServiceCall) -> dict[str, Any]:
     """Run recurring materialisation on demand, optionally for a single entry."""
     from .recurring import load_recurring, load_recurring_state, materialise_recurring

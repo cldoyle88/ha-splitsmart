@@ -499,5 +499,3 @@ async def materialise_recurring(
             state[entry.id] = highest_success
 
     return result
-
-

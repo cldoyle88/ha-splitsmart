@@ -196,7 +196,7 @@ async def test_promote_staging_eur_multi_category_rescaled(
     row = await _seed_eur_staging_row(storage, coordinator, amount=4.50)
     hass = _make_hass(storage, coordinator, fx_rate="0.869")
 
-    result = await _handle_promote_staging(
+    await _handle_promote_staging(
         _make_call(
             hass,
             {
@@ -240,7 +240,8 @@ async def test_promote_staging_eur_multi_category_rescaled(
 
     # Groceries: round(3.00 * 0.869, 2) = 2.61; Household absorbs drift: 3.91 - 2.61 = 1.30
     assert expense["categories"][0]["home_amount"] == round(3.00 * 0.869, 2)
-    assert expense["categories"][1]["home_amount"] == round(expected_home - round(3.00 * 0.869, 2), 2)
+    groceries_home = round(3.00 * 0.869, 2)
+    assert expense["categories"][1]["home_amount"] == round(expected_home - groceries_home, 2)
 
 
 # ------------------------------------------------------------------ add_expense
@@ -309,7 +310,7 @@ async def test_add_expense_gbp_categories_unchanged_by_rescale(
         }
     }
 
-    result = await _handle_add_expense(
+    await _handle_add_expense(
         _make_call(
             hass,
             {

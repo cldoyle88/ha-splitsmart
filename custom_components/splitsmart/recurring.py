@@ -362,7 +362,12 @@ async def materialise_recurring(
     """
     from .const import SOURCE_RECURRING
     from .fx import FxUnavailableError, FxUnsupportedCurrencyError
-    from .ledger import SplitsmartValidationError, build_expense_record, rescale_categories, validate_expense_record
+    from .ledger import (
+        SplitsmartValidationError,
+        build_expense_record,
+        rescale_categories,
+        validate_expense_record,
+    )
 
     _today = today or dt.date.today()
     result = MaterialiseResult()

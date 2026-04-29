@@ -264,11 +264,22 @@ All data lives under `/config/splitsmart/`. Never under `/config/www/` — those
   "created_by": "user_abc123",
   "target_type": "expense|settlement|staging",
   "target_id": "ex_01J9X...",
-  "operation": "edit|delete|discard",
+  "operation": "edit|delete|discard|promote",
   "previous_snapshot": { "...": "full prior state" },
+  "replacement_id": null,
   "reason": null
 }
 ```
+
+**Operation × target_type matrix:**
+
+| `target_type` | Valid `operation` values |
+|---|---|
+| `expense` | `edit`, `delete` |
+| `settlement` | `edit`, `delete` |
+| `staging` | `promote`, `discard`, `edit` |
+
+Staging tombstones use `promote` when a staging row morphs into a shared expense (`replacement_id` points at the new expense — added in M3); `discard` when a staging row is skipped (no replacement); `edit` when a staging row's rule fields (`rule_id` / `rule_action` / `category_hint`) are refreshed without a terminal action — written by `splitsmart.apply_rules` against `review_each_time` rule matches in M5.
 
 ### 6.3 Append-only + tombstone pattern
 

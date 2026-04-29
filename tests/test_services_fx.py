@@ -15,14 +15,13 @@ import datetime as dt
 import pathlib
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.splitsmart.const import DOMAIN
 from custom_components.splitsmart.coordinator import SplitsmartCoordinator
-from homeassistant.exceptions import ServiceValidationError
-
 from custom_components.splitsmart.services import (
     _handle_add_expense,
     _handle_edit_expense,
@@ -508,40 +507,40 @@ async def test_add_expense_unexpected_error_surfaces_as_service_validation_error
     re-raises as ServiceValidationError("Internal error in add_expense: ...").
     ServiceValidationError itself always passes through unchanged.
     """
-    from unittest.mock import patch
-
     hass = _make_hass(storage, coordinator)
 
-    with patch(
-        "custom_components.splitsmart.services.build_expense_record",
-        side_effect=AttributeError("injected test failure"),
+    with (
+        patch(
+            "custom_components.splitsmart.services.build_expense_record",
+            side_effect=AttributeError("injected test failure"),
+        ),
+        pytest.raises(ServiceValidationError, match="Internal error in add_expense"),
     ):
-        with pytest.raises(ServiceValidationError, match="Internal error in add_expense"):
-            await _handle_add_expense(
-                _make_call(
-                    hass,
-                    {
-                        "date": "2026-04-15",
-                        "description": "Test",
-                        "paid_by": "u1",
-                        "amount": 5.00,
-                        "currency": "GBP",
-                        "categories": [
-                            {
-                                "name": "Groceries",
-                                "home_amount": 5.00,
-                                "split": {
-                                    "method": "equal",
-                                    "shares": [
-                                        {"user_id": "u1", "value": 50},
-                                        {"user_id": "u2", "value": 50},
-                                    ],
-                                },
-                            }
-                        ],
-                    },
-                )
+        await _handle_add_expense(
+            _make_call(
+                hass,
+                {
+                    "date": "2026-04-15",
+                    "description": "Test",
+                    "paid_by": "u1",
+                    "amount": 5.00,
+                    "currency": "GBP",
+                    "categories": [
+                        {
+                            "name": "Groceries",
+                            "home_amount": 5.00,
+                            "split": {
+                                "method": "equal",
+                                "shares": [
+                                    {"user_id": "u1", "value": 50},
+                                    {"user_id": "u2", "value": 50},
+                                ],
+                            },
+                        }
+                    ],
+                },
             )
+        )
 
 
 async def test_add_expense_service_validation_error_passes_through(

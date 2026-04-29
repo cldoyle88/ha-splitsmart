@@ -352,9 +352,7 @@ def _service_guard(service_name: str):
             except (ServiceValidationError, HomeAssistantError, vol.Invalid):
                 raise
             except Exception as err:
-                _LOGGER.error(
-                    "Internal error in %s: %s", service_name, err, exc_info=True
-                )
+                _LOGGER.error("Internal error in %s: %s", service_name, err, exc_info=True)
                 raise ServiceValidationError(
                     f"Internal error in {service_name}: {err}. Please report this as a bug."
                 ) from err

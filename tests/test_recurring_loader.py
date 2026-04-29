@@ -14,8 +14,8 @@ PARTICIPANTS = ["u1", "u2"]
 # ------------------------------------------------------------------ happy path
 
 
-def test_load_netflix_fixture():
-    entries = load_recurring(FIXTURES / "netflix.yaml", participants=PARTICIPANTS)
+async def test_load_netflix_fixture():
+    entries = await load_recurring(FIXTURES / "netflix.yaml", participants=PARTICIPANTS)
     assert len(entries) == 1
     e = entries[0]
     assert e.id == "netflix"
@@ -27,8 +27,8 @@ def test_load_netflix_fixture():
     assert e.end_date is None
 
 
-def test_load_typical_household_fixture():
-    entries = load_recurring(FIXTURES / "typical_household.yaml", participants=PARTICIPANTS)
+async def test_load_typical_household_fixture():
+    entries = await load_recurring(FIXTURES / "typical_household.yaml", participants=PARTICIPANTS)
     assert len(entries) == 3
     ids = [e.id for e in entries]
     assert "netflix" in ids
@@ -39,20 +39,20 @@ def test_load_typical_household_fixture():
 # ------------------------------------------------------------------ missing file
 
 
-def test_missing_file_returns_empty(tmp_path: pathlib.Path):
-    entries = load_recurring(tmp_path / "does_not_exist.yaml", participants=PARTICIPANTS)
+async def test_missing_file_returns_empty(tmp_path: pathlib.Path):
+    entries = await load_recurring(tmp_path / "does_not_exist.yaml", participants=PARTICIPANTS)
     assert entries == []
 
 
 # ------------------------------------------------------------------ malformed file
 
 
-def test_malformed_valid_entry_still_loaded(caplog):
+async def test_malformed_valid_entry_still_loaded(caplog):
     """malformed.yaml has one valid + one invalid entry. Valid one must load."""
     import logging
 
     with caplog.at_level(logging.ERROR):
-        entries = load_recurring(FIXTURES / "malformed.yaml", participants=PARTICIPANTS)
+        entries = await load_recurring(FIXTURES / "malformed.yaml", participants=PARTICIPANTS)
 
     assert len(entries) == 1
     assert entries[0].id == "valid_one"
@@ -65,7 +65,7 @@ def test_malformed_valid_entry_still_loaded(caplog):
 # ------------------------------------------------------------------ paid_by not a participant
 
 
-def test_paid_by_not_participant_rejected(tmp_path: pathlib.Path, caplog):
+async def test_paid_by_not_participant_rejected(tmp_path: pathlib.Path, caplog):
     import logging
 
     yaml_content = """
@@ -91,7 +91,7 @@ recurring:
     p.write_text(yaml_content, encoding="utf-8")
 
     with caplog.at_level(logging.ERROR):
-        entries = load_recurring(p, participants=PARTICIPANTS)
+        entries = await load_recurring(p, participants=PARTICIPANTS)
 
     assert entries == []
     errors = [r for r in caplog.records if r.levelname == "ERROR"]
@@ -101,7 +101,7 @@ recurring:
 # ------------------------------------------------------------------ duplicate id
 
 
-def test_duplicate_id_second_rejected(tmp_path: pathlib.Path, caplog):
+async def test_duplicate_id_second_rejected(tmp_path: pathlib.Path, caplog):
     import logging
 
     yaml_content = """
@@ -136,7 +136,7 @@ recurring:
     p.write_text(yaml_content, encoding="utf-8")
 
     with caplog.at_level(logging.ERROR):
-        entries = load_recurring(p, participants=PARTICIPANTS)
+        entries = await load_recurring(p, participants=PARTICIPANTS)
 
     assert len(entries) == 1
     assert entries[0].description == "First"
@@ -147,7 +147,7 @@ recurring:
 # ------------------------------------------------------------------ schedule validation
 
 
-def test_invalid_day_0_rejected(tmp_path: pathlib.Path, caplog):
+async def test_invalid_day_0_rejected(tmp_path: pathlib.Path, caplog):
     import logging
 
     yaml_content = """
@@ -169,12 +169,12 @@ recurring:
     p.write_text(yaml_content, encoding="utf-8")
 
     with caplog.at_level(logging.ERROR):
-        entries = load_recurring(p, participants=PARTICIPANTS)
+        entries = await load_recurring(p, participants=PARTICIPANTS)
 
     assert entries == []
 
 
-def test_invalid_weekday_typo_rejected(tmp_path: pathlib.Path, caplog):
+async def test_invalid_weekday_typo_rejected(tmp_path: pathlib.Path, caplog):
     import logging
 
     yaml_content = """
@@ -196,6 +196,16 @@ recurring:
     p.write_text(yaml_content, encoding="utf-8")
 
     with caplog.at_level(logging.ERROR):
-        entries = load_recurring(p, participants=PARTICIPANTS)
+        entries = await load_recurring(p, participants=PARTICIPANTS)
 
     assert entries == []
+
+
+# ------------------------------------------------------------------ async guard
+
+
+async def test_load_recurring_is_async():
+    """Regression: Pi QA M4.2 Bug C — load_recurring was sync, blocking the event loop."""
+    import inspect
+
+    assert inspect.iscoroutinefunction(load_recurring)

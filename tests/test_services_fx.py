@@ -15,9 +15,10 @@ import datetime as dt
 import pathlib
 from decimal import Decimal
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from homeassistant.exceptions import ServiceValidationError
 
 from custom_components.splitsmart.const import DOMAIN
 from custom_components.splitsmart.coordinator import SplitsmartCoordinator
@@ -357,6 +358,54 @@ async def test_add_expense_gbp_categories_unchanged_by_rescale(
 # ------------------------------------------------------------------ edit_expense
 
 
+async def test_promote_staging_explicit_fx_date_as_string(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """Regression: Pi QA M4.2 Bug A.
+
+    Developer Tools sends fx_date as a plain string ("2026-04-17"). cv.date in the
+    schema coerces it to datetime.date, but handlers previously called .isoformat()
+    before passing to _resolve_fx, which then called .isoformat() again on the str —
+    AttributeError: 'str' object has no attribute 'isoformat'.
+
+    After fix: explicit_fx_date reaches _resolve_fx as datetime.date, .isoformat()
+    succeeds, and the promote completes without error.
+    """
+    row = await _seed_eur_staging_row(storage, coordinator, amount=10.00)
+    hass = _make_hass(storage, coordinator, fx_rate="0.869")
+
+    result = await _handle_promote_staging(
+        _make_call(
+            hass,
+            {
+                "staging_id": row["id"],
+                "paid_by": "u1",
+                # fx_date supplied as a plain string — Developer Tools equivalent.
+                # cv.date coerces it to datetime.date before the handler runs.
+                "fx_date": "2026-04-17",
+                "fx_rate": 0.869,
+                "categories": [
+                    {
+                        "name": "Groceries",
+                        "home_amount": 10.00,
+                        "split": {
+                            "method": "equal",
+                            "shares": [
+                                {"user_id": "u1", "value": 50},
+                                {"user_id": "u2", "value": 50},
+                            ],
+                        },
+                    }
+                ],
+            },
+        )
+    )
+
+    assert result["expense_id"].startswith("ex_")
+    expense = coordinator.data.expenses[0]
+    assert expense["fx_date"] == "2026-04-17"
+
+
 async def test_edit_expense_eur_rescales_categories(
     storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
 ):
@@ -441,3 +490,95 @@ async def test_edit_expense_eur_rescales_categories(
     expected_home = round(4.50 * 0.86888888888, 2)
     assert expense["home_amount"] == expected_home
     assert expense["categories"][0]["home_amount"] == expected_home
+
+
+# ------------------------------------------------------------------ Bug B: service error wrapping
+
+
+async def test_add_expense_unexpected_error_surfaces_as_service_validation_error(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """Regression: Pi QA M4.2 Bug B.
+
+    Before fix: AttributeError (or any unexpected exception) escaped the handler
+    and HA wrapped it as the opaque "Unknown error (unknown_error)".
+
+    After fix: the _service_guard decorator catches it, logs at ERROR, and
+    re-raises as ServiceValidationError("Internal error in add_expense: ...").
+    ServiceValidationError itself always passes through unchanged.
+    """
+    hass = _make_hass(storage, coordinator)
+
+    with (
+        patch(
+            "custom_components.splitsmart.services.build_expense_record",
+            side_effect=AttributeError("injected test failure"),
+        ),
+        pytest.raises(ServiceValidationError, match="Internal error in add_expense"),
+    ):
+        await _handle_add_expense(
+            _make_call(
+                hass,
+                {
+                    "date": "2026-04-15",
+                    "description": "Test",
+                    "paid_by": "u1",
+                    "amount": 5.00,
+                    "currency": "GBP",
+                    "categories": [
+                        {
+                            "name": "Groceries",
+                            "home_amount": 5.00,
+                            "split": {
+                                "method": "equal",
+                                "shares": [
+                                    {"user_id": "u1", "value": 50},
+                                    {"user_id": "u2", "value": 50},
+                                ],
+                            },
+                        }
+                    ],
+                },
+            )
+        )
+
+
+async def test_add_expense_service_validation_error_passes_through(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    """ServiceValidationError must not be wrapped — callers expect its exact message."""
+    hass = _make_hass(storage, coordinator)
+
+    # GBP expense with an explicit fx_rate triggers ServiceValidationError directly
+    # in _resolve_fx: "fx_rate provided for a home-currency entry."
+    with pytest.raises(ServiceValidationError) as exc_info:
+        await _handle_add_expense(
+            _make_call(
+                hass,
+                {
+                    "date": "2026-04-15",
+                    "description": "Test",
+                    "paid_by": "u1",
+                    "amount": 5.00,
+                    "currency": "GBP",
+                    "fx_rate": 1.2,
+                    "categories": [
+                        {
+                            "name": "Groceries",
+                            "home_amount": 5.00,
+                            "split": {
+                                "method": "equal",
+                                "shares": [
+                                    {"user_id": "u1", "value": 50},
+                                    {"user_id": "u2", "value": 50},
+                                ],
+                            },
+                        }
+                    ],
+                },
+            )
+        )
+
+    # Must NOT be wrapped in "Internal error in add_expense"
+    assert "Internal error" not in str(exc_info.value)
+    assert "fx_rate provided for a home-currency entry" in str(exc_info.value)

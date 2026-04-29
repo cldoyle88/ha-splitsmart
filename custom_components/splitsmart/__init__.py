@@ -110,7 +110,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _materialise_daily(_now: dt.datetime) -> None:
         from .recurring import load_recurring, load_recurring_state, materialise_recurring
 
-        recurring_entries = load_recurring(
+        recurring_entries = await load_recurring(
             storage.recurring_yaml_path,
             participants=list(participants),
         )

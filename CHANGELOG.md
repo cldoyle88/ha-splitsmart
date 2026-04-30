@@ -7,6 +7,123 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added – M5 Staging, Rules, and Import (2026-04-30)
+
+**Rules engine (`rules.py`)**
+- Pure `Rule` dataclass with `id`, `description`, `pattern` (compiled regex),
+  `currency_match`, `amount_min/max`, `action`, `category`, `split`,
+  `priority`.
+- `load_rules(path)` / `async_load_rules(path)` – parse and validate
+  `rules.yaml`; errors are collected, not raised, so one bad rule doesn't
+  block the rest.
+- `apply_rules(rows, rules)` – pure function; returns `(auto_promoted,
+  auto_ignored, review_each_time, still_pending)` counts.
+- `build_categories_from_rule(rule, row)` – derives a single-category
+  `CategoryAllocation` list from an `always_split` rule.
+
+**Rules coordinator / services**
+- `SplitsmartCoordinator.rules`, `rules_errors`, `rules_loaded_at`,
+  `async_reload_rules()` wired into the coordinator.
+- `splitsmart.apply_rules` service: runs the loaded rules against the
+  caller's pending staging rows; returns auto-promoted, auto-ignored,
+  auto-review, still-pending counts via `return_response`.
+
+**Rules websocket commands**
+- `splitsmart/list_rules` – one-shot read.
+- `splitsmart/list_rules/subscribe` – push `init` on first connect, `reload`
+  only when `rules_loaded_at` changes (not on every coordinator update).
+- `splitsmart/reload_rules` – force a re-read from disk, returns version +
+  counts + errors.
+- `splitsmart/draft_rule_from_row` – generates a YAML snippet for a staging
+  row (caller must own the row); action can be `always_split`,
+  `always_ignore`, or `review_each_time`.
+
+**30-second rules.yaml watcher (`__init__.py`)**
+- `async_track_time_interval` polling `rules_yaml_path.stat().st_mtime`
+  every 30 seconds; calls `coordinator.async_reload_rules()` on change.
+
+**Staging websocket commands**
+- `splitsmart/list_staging` – one-shot read, returns pending + review rows
+  with tombstone list.
+- `splitsmart/list_staging/subscribe` – live subscription with `init` + delta
+  events (added / updated / deleted).
+
+**Import services**
+- `splitsmart.promote_staging` – promotes a staging row to an expense;
+  accepts `paid_by`, `categories`, optional `override_description`,
+  `override_date`, `notes`, `receipt_path`.
+- `splitsmart.skip_staging` – tombstones a staging row (idempotent; row can
+  be re-imported).
+- `splitsmart.apply_rules` – see above.
+
+**Frontend – Home view**
+- `<ss-home-view>`: "Coming in M5" placeholder tile replaced by a live
+  import tile; navigates to `#import`. Shows a pending-row badge when the
+  `sensor.splitsmart_pending_count_<user>` sensor returns a non-zero value.
+
+**Frontend – Import view (`ss-import-view`)**
+- Drag-and-drop / file-browse area for CSV, OFX, QFX, XLSX.
+- Uploads via `POST /api/splitsmart/upload` + `splitsmart/inspect_upload`.
+- If a preset or saved mapping is found: imports immediately via
+  `splitsmart.import_file`, shows summary, offers "Review pending" CTA.
+- If no mapping: routes to the column-mapping wizard at `#wizard/<upload_id>`.
+
+**Frontend – Column-mapping wizard (`ss-import-wizard-view`, `ss-column-role-picker`)**
+- Three-step wizard: Preview (header + sample rows) → Roles (per-column
+  `date | description | amount | debit | credit | currency | ignore`) →
+  Commit (save mapping + import + navigate to staging).
+- `<ss-column-role-picker>` primitive: column header, up to 3 sample values,
+  native `<select>` for role.
+- `defaultRoles()` auto-assigns common header names; `isReadyToCommit()`
+  guards the Commit button (needs date + description + amount/debit+credit).
+
+**Frontend – Rules view (`ss-rules-view`)**
+- Live subscription to `splitsmart/list_rules/subscribe`.
+- Read-only rule list with action badge (green = always-split, grey =
+  always-ignore, yellow = review-each-time).
+- Reload button calls `splitsmart/reload_rules`.
+- Error list (red boxes) for YAML parse failures.
+- Empty state shows a YAML snippet template.
+
+**Frontend – Staging review queue (`ss-staging-view`)**
+- Live subscription to `splitsmart/list_staging/subscribe`.
+- Per-row quick actions: Split 50/50 (promotes with default equal split),
+  Ignore (skips); FX rows have Split 50/50 disabled.
+- Tap row body → navigates to `#staging/<id>` (detail sheet).
+- Bulk mode: long-press (600 ms) → checkbox mode; "Skip selected" skips all
+  checked rows sequentially.
+- Filter chips by source_preset and foreign currency.
+- 5-second auto-dismiss toast confirms each action.
+- Empty state with "Import file" and "Add expense" CTAs.
+
+**Frontend – Staging detail sheet (`ss-staging-detail-sheet`)**
+- Per-row detail overlay at `#staging/<staging_id>`; self-subscribes to find
+  its row by ID.
+- Paid-by picker, category + split picker (single or multi-allocation via
+  `<ss-allocation-editor>`).
+- Collapsible "Override description / date / notes" and "Import metadata"
+  sections.
+- Promote → `splitsmart.promote_staging`. Skip → `splitsmart.skip_staging`.
+- FX rows: home-amount input replaces quick split; FX banner explains the
+  lookup happens at promote time.
+- "Create rule from this row" section with three action buttons (always
+  split / always ignore / review each time) that call
+  `splitsmart/draft_rule_from_row` and open the rule-snippet sheet.
+
+**Frontend – Rule snippet sheet (`ss-rule-snippet-sheet`)**
+- Overlay showing the YAML snippet returned by `draft_rule_from_row`.
+- Copy-to-clipboard with visual feedback; falls back to text-selection when
+  the Clipboard API is unavailable.
+
+**Frontend – Router + card wiring**
+- Router: `'rules' | 'import' | 'wizard' | 'staging'` added to `RouteView`.
+  `wizard` and `staging/<id>` support an optional param segment.
+- `splitsmart-card.ts`: routes wired; staging detail overlay treated as a
+  quasi-detail so `_backgroundRoute` stays at `#staging`.
+
+**Manual QA checklist** — `tests/MANUAL_QA_M5.md` (items covering rules,
+staging, import, and wizard flows).
+
 ### Fixed – M4.2 hotfix (2026-04-27)
 
 **Bug A – `_resolve_fx` AttributeError on explicit `fx_date`**

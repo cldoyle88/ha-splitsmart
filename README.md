@@ -140,6 +140,28 @@ Data lives in `<ha_config>/splitsmart/shared/`:
 - `settlements.jsonl` – settlement records
 - `tombstones.jsonl` – edit/delete markers (append-only audit trail)
 
+## Deploying to Pi for QA
+
+`scripts/deploy-pi.sh` builds the production bundle and rsyncs the integration to a Raspberry Pi running HA. It is for pre-merge QA only; production deploys use HACS.
+
+```bash
+export SPLITSMART_PI_HOST=homeassistant.local   # Pi hostname or IP
+export SPLITSMART_PI_USER=root                  # SSH user
+export SPLITSMART_PI_PATH=/config/custom_components/splitsmart   # default; omit to use this value
+export SPLITSMART_PI_HA_TOKEN=<long-lived-token>  # optional; triggers a component reload after rsync
+
+bash scripts/deploy-pi.sh
+```
+
+The script will:
+1. Build `frontend/` with `npm run build:prod` (installs `node_modules` if absent).
+2. Verify the bundle mtime advanced after the build.
+3. Rsync `custom_components/splitsmart/` to the Pi, excluding `__pycache__` and `*.pyc`.
+4. If `SPLITSMART_PI_HA_TOKEN` is set, POST to the HA REST API to reload the integration. Otherwise print a reminder to restart manually.
+5. Print a cache-busted bundle URL for verification in DevTools.
+
+`SPLITSMART_PI_HA_TOKEN` is a long-lived access token created in HA under *Profile → Long-Lived Access Tokens*. Keep it out of version control.
+
 ## Development
 
 ```bash

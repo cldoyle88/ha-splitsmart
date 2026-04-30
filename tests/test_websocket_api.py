@@ -27,12 +27,16 @@ from custom_components.splitsmart.services import _handle_add_expense
 from custom_components.splitsmart.storage import SplitsmartStorage
 from custom_components.splitsmart.websocket_api import (
     API_VERSION,
+    _handle_draft_rule_from_row,
     _handle_get_config,
     _handle_inspect_upload,
     _handle_list_expenses,
     _handle_list_presets,
+    _handle_list_rules,
+    _handle_list_rules_subscribe,
     _handle_list_staging,
     _handle_list_staging_subscribe,
+    _handle_reload_rules,
     _handle_save_mapping,
     _handle_subscribe,
 )
@@ -809,5 +813,347 @@ async def test_inspect_upload_permission_denied(
         {"id": 142, "type": "splitsmart/inspect_upload", "upload_id": "anything"},
     )
 
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "permission_denied"
+
+
+# ------------------------------------------------------------------ list_rules
+
+
+async def test_list_rules_empty(storage: SplitsmartStorage, coordinator: SplitsmartCoordinator):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_rules(hass, conn, {"id": 200, "type": "splitsmart/list_rules"})
+
+    conn.send_result.assert_called_once()
+    _, payload = conn.send_result.call_args.args
+    assert payload["version"] == API_VERSION
+    assert payload["rules"] == []
+    assert payload["errors"] == []
+    assert payload["loaded_at"] is None
+    assert "splitsmart" in payload["source_path"]
+
+
+async def test_list_rules_with_loaded_rules(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    from custom_components.splitsmart.rules import load_rules
+
+    yaml_text = """
+rules:
+  - id: r_netflix
+    match: /netflix/i
+    action: always_split
+    category: Subscriptions
+    split:
+      method: equal
+      preset: "50_50"
+"""
+    named_splits = {
+        "50_50": {
+            "method": "equal",
+            "shares": [{"user_id": "u1", "value": 50}, {"user_id": "u2", "value": 50}],
+        }
+    }
+    rules, _ = load_rules(yaml_text, named_splits=named_splits)
+    coordinator.rules = rules
+
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_rules(hass, conn, {"id": 201, "type": "splitsmart/list_rules"})
+
+    _, payload = conn.send_result.call_args.args
+    assert len(payload["rules"]) == 1
+    r = payload["rules"][0]
+    assert r["id"] == "r_netflix"
+    assert r["action"] == "always_split"
+    assert r["category"] == "Subscriptions"
+    assert "netflix" in r["pattern"]
+
+
+async def test_list_rules_permission_denied(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u_stranger")
+
+    await _handle_list_rules(hass, conn, {"id": 202, "type": "splitsmart/list_rules"})
+
+    conn.send_result.assert_not_called()
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "permission_denied"
+
+
+async def test_list_rules_not_found_when_unloaded():
+    hass = MagicMock()
+    hass.data = {}
+    conn = _make_connection("u1")
+
+    await _handle_list_rules(hass, conn, {"id": 203, "type": "splitsmart/list_rules"})
+
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "not_found"
+
+
+# ------------------------------------------------------------------ list_rules/subscribe
+
+
+async def test_list_rules_subscribe_sends_init(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_rules_subscribe(
+        hass, conn, {"id": 210, "type": "splitsmart/list_rules/subscribe"}
+    )
+
+    conn.send_result.assert_called_once_with(210)
+    conn.send_message.assert_called_once()
+    event = conn.send_message.call_args.args[0]["event"]
+    assert event["kind"] == "init"
+    assert event["version"] == API_VERSION
+    assert event["rules"] == []
+    assert 210 in conn.subscriptions
+
+
+async def test_list_rules_subscribe_delta_on_reload(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    from datetime import UTC, datetime
+
+    from custom_components.splitsmart.rules import load_rules
+
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_rules_subscribe(
+        hass, conn, {"id": 211, "type": "splitsmart/list_rules/subscribe"}
+    )
+    assert conn.send_message.call_count == 1
+
+    yaml_text = "rules:\n  - id: r_tfl\n    match: /tfl/i\n    action: always_ignore\n"
+    rules, _ = load_rules(yaml_text, named_splits={})
+    coordinator.rules = rules
+    coordinator.rules_loaded_at = datetime.now(tz=UTC)
+    coordinator.async_update_listeners()
+
+    assert conn.send_message.call_count == 2
+    event = conn.send_message.call_args.args[0]["event"]
+    assert event["kind"] == "reload"
+    assert len(event["rules"]) == 1
+    assert event["rules"][0]["id"] == "r_tfl"
+
+
+async def test_list_rules_subscribe_no_delta_without_reload(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_list_rules_subscribe(
+        hass, conn, {"id": 212, "type": "splitsmart/list_rules/subscribe"}
+    )
+    init_count = conn.send_message.call_count
+
+    coordinator.async_update_listeners()
+
+    assert conn.send_message.call_count == init_count
+
+
+# ------------------------------------------------------------------ draft_rule_from_row
+
+
+async def _seed_staging_row(
+    storage: SplitsmartStorage,
+    coordinator: SplitsmartCoordinator,
+    user_id: str = "u1",
+    description: str = "NETFLIX.COM",
+    category_hint: str | None = None,
+) -> str:
+    """Append a minimal staging row and refresh the coordinator."""
+    from custom_components.splitsmart.storage import new_id
+
+    row: dict[str, Any] = {
+        "id": new_id("st"),
+        "uploaded_by": user_id,
+        "description": description,
+        "amount": 15.99,
+        "currency": "GBP",
+        "date": "2026-04-01",
+        "rule_action": "pending",
+        "rule_id": None,
+    }
+    if category_hint:
+        row["category_hint"] = category_hint
+    await storage.append(storage.staging_path(user_id), row)
+    coordinator.data = await coordinator._async_update_data()
+    return row["id"]
+
+
+async def test_draft_rule_from_row_happy_path(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    staging_id = await _seed_staging_row(storage, coordinator, description="NETFLIX.COM")
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_draft_rule_from_row(
+        hass,
+        conn,
+        {
+            "id": 220,
+            "type": "splitsmart/draft_rule_from_row",
+            "staging_id": staging_id,
+            "action": "always_split",
+            "default_split_preset": "50_50",
+        },
+    )
+
+    conn.send_result.assert_called_once()
+    _, payload = conn.send_result.call_args.args
+    assert payload["version"] == API_VERSION
+    assert "yaml_snippet" in payload
+    assert "draft" in payload
+    snippet = payload["yaml_snippet"]
+    assert "NETFLIX" in snippet.upper() or "netflix" in snippet.lower()
+    assert "always_split" in snippet
+    assert payload["draft"]["action"] == "always_split"
+
+
+async def test_draft_rule_from_row_uses_category_hint(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    staging_id = await _seed_staging_row(
+        storage, coordinator, description="Deliveroo", category_hint="Eating out"
+    )
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_draft_rule_from_row(
+        hass,
+        conn,
+        {
+            "id": 221,
+            "type": "splitsmart/draft_rule_from_row",
+            "staging_id": staging_id,
+            "action": "review_each_time",
+        },
+    )
+
+    _, payload = conn.send_result.call_args.args
+    assert payload["draft"]["category"] == "Eating out"
+    assert "Eating out" in payload["yaml_snippet"]
+
+
+async def test_draft_rule_from_row_not_found(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_draft_rule_from_row(
+        hass,
+        conn,
+        {
+            "id": 222,
+            "type": "splitsmart/draft_rule_from_row",
+            "staging_id": "st_doesnotexist",
+            "action": "always_ignore",
+        },
+    )
+
+    conn.send_result.assert_not_called()
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "not_found"
+
+
+async def test_draft_rule_from_row_privacy_check(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    staging_id = await _seed_staging_row(storage, coordinator, user_id="u1")
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u2")
+
+    await _handle_draft_rule_from_row(
+        hass,
+        conn,
+        {
+            "id": 223,
+            "type": "splitsmart/draft_rule_from_row",
+            "staging_id": staging_id,
+            "action": "always_ignore",
+        },
+    )
+
+    conn.send_result.assert_not_called()
+    conn.send_error.assert_called_once()
+    assert conn.send_error.call_args.args[1] == "not_found"
+
+
+# ------------------------------------------------------------------ reload_rules
+
+
+async def test_reload_rules_returns_counts(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    # reload_rules reads from disk; rules.yaml doesn't exist → resets to [].
+    await _handle_reload_rules(hass, conn, {"id": 230, "type": "splitsmart/reload_rules"})
+
+    conn.send_result.assert_called_once()
+    _, payload = conn.send_result.call_args.args
+    assert payload["version"] == API_VERSION
+    assert "loaded_at" in payload
+    assert "rules_count" in payload
+    assert payload["errors"] == []
+    assert payload["rules_count"] == 0
+
+
+async def test_reload_rules_loads_from_disk(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    rules_yaml = storage.rules_yaml_path
+    rules_yaml.write_text(
+        "rules:\n  - id: r_a\n    match: /amazon/i\n    action: always_ignore\n",
+        encoding="utf-8",
+    )
+
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u1")
+
+    await _handle_reload_rules(hass, conn, {"id": 231, "type": "splitsmart/reload_rules"})
+
+    _, payload = conn.send_result.call_args.args
+    assert payload["rules_count"] == 1
+    assert coordinator.rules[0].id == "r_a"
+
+
+async def test_reload_rules_permission_denied(
+    storage: SplitsmartStorage, coordinator: SplitsmartCoordinator
+):
+    entry = _make_entry()
+    hass = _make_hass(storage, coordinator, entry)
+    conn = _make_connection("u_stranger")
+
+    await _handle_reload_rules(hass, conn, {"id": 232, "type": "splitsmart/reload_rules"})
+
+    conn.send_result.assert_not_called()
     conn.send_error.assert_called_once()
     assert conn.send_error.call_args.args[1] == "permission_denied"

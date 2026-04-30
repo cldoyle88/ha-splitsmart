@@ -23,6 +23,17 @@ M3 commands:
 - ``splitsmart/inspect_upload``: one-shot. Re-runs inspect on a previously
   uploaded file, returning its ``FileInspection`` payload.
 
+M5 commands:
+
+- ``splitsmart/list_rules``: one-shot. Returns the in-memory rule list,
+  ``loaded_at``, ``source_path``, and any load errors.
+- ``splitsmart/list_rules/subscribe``: long-lived. Init payload then delta
+  on file-watcher reload (coordinator calls ``async_update_listeners``).
+- ``splitsmart/draft_rule_from_row``: one-shot. Privacy-checked against the
+  caller's staging; returns a YAML snippet + draft Rule dict.
+- ``splitsmart/reload_rules``: one-shot. Forces ``async_reload_rules`` and
+  returns the new counts.
+
 Every response includes ``version: 1`` so the contract can evolve without
 silently breaking older cards. Non-participant callers get ``permission_denied``.
 """
@@ -30,6 +41,7 @@ silently breaking older cards. Non-participant callers get ``permission_denied``
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 import voluptuous as vol
@@ -556,6 +568,248 @@ async def _handle_inspect_upload(hass: HomeAssistant, connection: Any, msg: dict
     )
 
 
+# --------------------------------------------------------------------- M5 helpers
+
+
+def _serialize_rule(rule: Any) -> dict[str, Any]:
+    """Convert a Rule dataclass to a JSON-serialisable dict."""
+    return {
+        "id": rule.id,
+        "description": rule.description,
+        "pattern": rule.pattern.pattern,
+        "currency_match": rule.currency_match,
+        "amount_min": str(rule.amount_min) if rule.amount_min is not None else None,
+        "amount_max": str(rule.amount_max) if rule.amount_max is not None else None,
+        "action": rule.action,
+        "category": rule.category,
+        "split": rule.split,
+        "priority": rule.priority,
+    }
+
+
+def _draft_regex(description: str) -> str:
+    """Extract the longest alphabetic run from description as a regex literal."""
+    runs = re.findall(r"[A-Za-z]+", description)
+    if not runs:
+        return re.escape(description.strip()) or ".*"
+    return re.escape(max(runs, key=len))
+
+
+def _build_yaml_snippet(
+    *,
+    description: str,
+    action: str,
+    pattern_str: str,
+    category: str | None,
+    split_preset: str | None,
+) -> str:
+    """Return a copy-pasteable YAML snippet for a new rule."""
+    lines = [
+        "rules:",
+        f"  - id: r_{ULID_PLACEHOLDER}",
+        f'    description: "Auto-generated from {description!r}"',
+        f"    match: /{pattern_str}/i",
+        f"    action: {action}",
+    ]
+    if category:
+        lines.append(f"    category: {category}")
+    if action == "always_split" and split_preset:
+        lines.append("    split:")
+        lines.append(f'      preset: "{split_preset}"')
+    return "\n".join(lines)
+
+
+# Placeholder string swapped out in the handler once we have an actual ULID.
+ULID_PLACEHOLDER = "<unique-id>"
+
+
+# --------------------------------------------------------------------- M5 handlers
+
+
+async def _handle_list_rules(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, coordinator = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    storage = _resolve_storage(hass)
+    loaded_at = coordinator.rules_loaded_at.isoformat() if coordinator.rules_loaded_at else None
+
+    connection.send_result(
+        msg["id"],
+        {
+            "version": API_VERSION,
+            "rules": [_serialize_rule(r) for r in coordinator.rules],
+            "loaded_at": loaded_at,
+            "source_path": str(storage.rules_yaml_path),
+            "errors": list(coordinator.rules_errors),
+        },
+    )
+
+
+async def _handle_list_rules_subscribe(
+    hass: HomeAssistant, connection: Any, msg: dict[str, Any]
+) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, coordinator = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    storage = _resolve_storage(hass)
+    msg_id = msg["id"]
+
+    def _current_loaded_at() -> str | None:
+        return coordinator.rules_loaded_at.isoformat() if coordinator.rules_loaded_at else None
+
+    prev_loaded_at = _current_loaded_at()
+
+    connection.send_result(msg_id)
+    connection.send_message(
+        {
+            "id": msg_id,
+            "type": "event",
+            "event": {
+                "version": API_VERSION,
+                "kind": "init",
+                "rules": [_serialize_rule(r) for r in coordinator.rules],
+                "loaded_at": prev_loaded_at,
+                "source_path": str(storage.rules_yaml_path),
+                "errors": list(coordinator.rules_errors),
+            },
+        }
+    )
+
+    @callback
+    def _on_update() -> None:
+        nonlocal prev_loaded_at
+        curr_loaded_at = _current_loaded_at()
+        if curr_loaded_at == prev_loaded_at:
+            return
+        prev_loaded_at = curr_loaded_at
+        connection.send_message(
+            {
+                "id": msg_id,
+                "type": "event",
+                "event": {
+                    "version": API_VERSION,
+                    "kind": "reload",
+                    "rules": [_serialize_rule(r) for r in coordinator.rules],
+                    "loaded_at": curr_loaded_at,
+                    "errors": list(coordinator.rules_errors),
+                },
+            }
+        )
+
+    unsubscribe = coordinator.async_add_listener(_on_update)
+    connection.subscriptions[msg_id] = unsubscribe
+
+
+async def _handle_draft_rule_from_row(
+    hass: HomeAssistant, connection: Any, msg: dict[str, Any]
+) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, coordinator = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    staging_id: str = msg["staging_id"]
+    action: str = msg["action"]
+    default_split_preset: str | None = msg.get("default_split_preset")
+
+    data = coordinator.data
+    rows = data.staging_by_user.get(caller_id, []) if data is not None else []
+    row = next((r for r in rows if r.get("id") == staging_id), None)
+    if row is None:
+        connection.send_error(
+            msg["id"],
+            "not_found",
+            f"Staging row '{staging_id}' not found in your inbox.",
+        )
+        return
+
+    description: str = row.get("description") or ""
+    pattern_str = _draft_regex(description)
+
+    # Resolve category hint: prefer rule's category_hint, then default "Other".
+    category_hint: str | None = row.get("category_hint")
+
+    # Generate a short human-readable id suggestion.
+    longest = max(re.findall(r"[A-Za-z]+", description), key=len, default=description) or "row"
+    alpha_run = re.sub(r"[^a-z0-9]", "_", longest.lower())
+    suggested_id = f"r_{alpha_run[:20]}"
+
+    snippet = _build_yaml_snippet(
+        description=description,
+        action=action,
+        pattern_str=pattern_str,
+        category=category_hint,
+        split_preset=default_split_preset,
+    ).replace(ULID_PLACEHOLDER, alpha_run[:20])
+
+    draft: dict[str, Any] = {
+        "id": suggested_id,
+        "description": f'Auto-generated from "{description}"',
+        "pattern": f"/{pattern_str}/i",
+        "action": action,
+        "category": category_hint,
+        "split": {"preset": default_split_preset} if default_split_preset else None,
+        "priority": None,
+    }
+
+    connection.send_result(
+        msg["id"],
+        {
+            "version": API_VERSION,
+            "yaml_snippet": snippet,
+            "draft": draft,
+        },
+    )
+
+
+async def _handle_reload_rules(hass: HomeAssistant, connection: Any, msg: dict[str, Any]) -> None:
+    resolved = _resolve_entry(hass)
+    if resolved is None:
+        _not_found(connection, msg["id"])
+        return
+    entry, coordinator = resolved
+
+    caller_id = connection.user.id
+    if caller_id not in entry.data[CONF_PARTICIPANTS]:
+        _permission_denied(connection, msg["id"])
+        return
+
+    await coordinator.async_reload_rules()
+
+    loaded_at = coordinator.rules_loaded_at.isoformat() if coordinator.rules_loaded_at else None
+    connection.send_result(
+        msg["id"],
+        {
+            "version": API_VERSION,
+            "loaded_at": loaded_at,
+            "rules_count": len(coordinator.rules),
+            "errors": list(coordinator.rules_errors),
+        },
+    )
+
+
 # --------------------------------------------------------------------- registered handlers
 
 
@@ -686,6 +940,72 @@ async def handle_inspect_upload(
     await _handle_inspect_upload(hass, connection, msg)
 
 
+# --------------------------------------------------------------------- M5 registered handlers
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/list_rules",
+    }
+)
+@websocket_api.async_response
+async def handle_list_rules(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Return the in-memory rule list, load timestamp, and any errors."""
+    await _handle_list_rules(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/list_rules/subscribe",
+    }
+)
+@websocket_api.async_response
+async def handle_list_rules_subscribe(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Subscribe to rule reloads. Init payload then delta events on file-watcher reload."""
+    await _handle_list_rules_subscribe(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/draft_rule_from_row",
+        vol.Required("staging_id"): str,
+        vol.Required("action"): vol.In(["always_split", "always_ignore", "review_each_time"]),
+        vol.Optional("default_split_preset"): str,
+    }
+)
+@websocket_api.async_response
+async def handle_draft_rule_from_row(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Generate a YAML snippet + draft Rule from a staging row the caller owns."""
+    await _handle_draft_rule_from_row(hass, connection, msg)
+
+
+@websocket_api.websocket_command(
+    {
+        vol.Required("type"): "splitsmart/reload_rules",
+    }
+)
+@websocket_api.async_response
+async def handle_reload_rules(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Force a re-read of rules.yaml and return the new counts."""
+    await _handle_reload_rules(hass, connection, msg)
+
+
 # --------------------------------------------------------------------- registration
 
 
@@ -704,5 +1024,10 @@ def async_register_websocket_commands(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, handle_list_presets)
     websocket_api.async_register_command(hass, handle_save_mapping)
     websocket_api.async_register_command(hass, handle_inspect_upload)
+    # M5
+    websocket_api.async_register_command(hass, handle_list_rules)
+    websocket_api.async_register_command(hass, handle_list_rules_subscribe)
+    websocket_api.async_register_command(hass, handle_draft_rule_from_row)
+    websocket_api.async_register_command(hass, handle_reload_rules)
 
     hass.data[DOMAIN][flag] = True

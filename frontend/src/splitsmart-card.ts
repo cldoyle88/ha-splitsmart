@@ -41,6 +41,8 @@ import './views/settlement-detail-sheet';
 import './views/rules-view';
 import './views/import-view';
 import './views/import-wizard-view';
+import './views/staging-view';
+import './views/staging-detail-sheet';
 
 export const VERSION = '0.1.0-m5';
 
@@ -133,10 +135,13 @@ export class SplitsmartCard extends LitElement {
     if (changed.has('hass') && !changed.get('hass') && this.hass) {
       this._maybeHydrate();
     }
-    // Keep background route current for M5 views that are not detail sheets.
+    // Keep background route current for views that are not detail overlays.
     if (changed.has('_route')) {
       const r = this._route;
-      const isDetail = r.view === 'expense' || r.view === 'settlement';
+      const isDetail =
+        r.view === 'expense' ||
+        r.view === 'settlement' ||
+        (r.view === 'staging' && !!r.param);
       if (!isDetail) this._backgroundRoute = r;
     }
   }
@@ -247,12 +252,25 @@ export class SplitsmartCard extends LitElement {
       }
     }
 
-    const routeForPrimary =
-      this._route.view === 'expense' || this._route.view === 'settlement'
-        ? this._backgroundRoute
-        : this._route;
+    const isDetailOverlay =
+      this._route.view === 'expense' ||
+      this._route.view === 'settlement' ||
+      (this._route.view === 'staging' && !!this._route.param);
+    const routeForPrimary = isDetailOverlay ? this._backgroundRoute : this._route;
 
     const primary = this._renderRoute(routeForPrimary, balances, pairwise);
+
+    if (this._route.view === 'staging' && this._route.param) {
+      return html`
+        ${primary}
+        <ss-staging-detail-sheet
+          .hass=${this.hass}
+          .config=${this._splitsmartConfig}
+          .stagingId=${this._route.param}
+          @close=${() => navigate('staging')}
+        ></ss-staging-detail-sheet>
+      `;
+    }
 
     if (this._route.view === 'expense') {
       const expense = this._expenses.find((e) => e.id === this._route.param) ?? null;
@@ -353,6 +371,13 @@ export class SplitsmartCard extends LitElement {
             .config=${this._splitsmartConfig}
             .uploadId=${route.param ?? ''}
           ></ss-import-wizard-view>
+        `;
+      case 'staging':
+        return html`
+          <ss-staging-view
+            .hass=${this.hass}
+            .config=${this._splitsmartConfig}
+          ></ss-staging-view>
         `;
       case 'home':
       default:

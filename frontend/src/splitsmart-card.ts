@@ -38,10 +38,13 @@ import './views/add-expense-view';
 import './views/settle-up-view';
 import './views/expense-detail-sheet';
 import './views/settlement-detail-sheet';
+import './views/rules-view';
+import './views/import-view';
+import './views/import-wizard-view';
 
-export const VERSION = '0.1.0-m2';
+export const VERSION = '0.1.0-m5';
 
-const SUPPORTED_VIEWS = new Set(['home', 'ledger', 'add', 'settle']);
+const SUPPORTED_VIEWS = new Set(['home', 'ledger', 'add', 'settle', 'rules', 'import', 'wizard', 'staging']);
 
 @customElement('splitsmart-card')
 export class SplitsmartCard extends LitElement {
@@ -129,6 +132,12 @@ export class SplitsmartCard extends LitElement {
   protected updated(changed: PropertyValues): void {
     if (changed.has('hass') && !changed.get('hass') && this.hass) {
       this._maybeHydrate();
+    }
+    // Keep background route current for M5 views that are not detail sheets.
+    if (changed.has('_route')) {
+      const r = this._route;
+      const isDetail = r.view === 'expense' || r.view === 'settlement';
+      if (!isDetail) this._backgroundRoute = r;
     }
   }
 
@@ -322,6 +331,28 @@ export class SplitsmartCard extends LitElement {
             .settlements=${this._settlements}
             .locale=${this._locale()}
           ></ss-settle-up-view>
+        `;
+      case 'rules':
+        return html`
+          <ss-rules-view
+            .hass=${this.hass}
+            .config=${this._splitsmartConfig}
+          ></ss-rules-view>
+        `;
+      case 'import':
+        return html`
+          <ss-import-view
+            .hass=${this.hass}
+            .config=${this._splitsmartConfig}
+          ></ss-import-view>
+        `;
+      case 'wizard':
+        return html`
+          <ss-import-wizard-view
+            .hass=${this.hass}
+            .config=${this._splitsmartConfig}
+            .uploadId=${route.param ?? ''}
+          ></ss-import-wizard-view>
         `;
       case 'home':
       default:

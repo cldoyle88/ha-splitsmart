@@ -20,7 +20,11 @@ export type RouteView =
   | 'add'
   | 'settle'
   | 'expense'
-  | 'settlement';
+  | 'settlement'
+  | 'rules'
+  | 'import'
+  | 'wizard'
+  | 'staging';
 
 export interface Route {
   view: RouteView;
@@ -37,6 +41,10 @@ const VIEWS: ReadonlySet<RouteView> = new Set([
   'settle',
   'expense',
   'settlement',
+  'rules',
+  'import',
+  'wizard',
+  'staging',
 ]);
 
 const DEFAULT_ROUTE: Route = { view: 'home', query: {} };
@@ -55,7 +63,7 @@ export function parseHash(hash: string): Route {
   }
 
   const view = viewSeg as RouteView;
-  const requiresParam = view === 'expense' || view === 'settlement';
+  const requiresParam = view === 'expense' || view === 'settlement' || view === 'wizard';
   if (requiresParam && !paramSeg) {
     return { ...DEFAULT_ROUTE };
   }
@@ -70,7 +78,7 @@ export function parseHash(hash: string): Route {
   }
 
   const route: Route = { view, query };
-  if (requiresParam) route.param = paramSeg!;
+  if (paramSeg) route.param = paramSeg;
   return route;
 }
 

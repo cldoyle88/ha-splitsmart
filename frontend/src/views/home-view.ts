@@ -236,13 +236,28 @@ export class SsHomeView extends LitElement {
           </ss-button>
         </div>
 
-        <ss-placeholder-tile
-          icon="mdi:tray-full"
-          title="Pending review"
-          milestone="M5"
-          caption="Receipts and imported rows waiting for a split/ignore decision."
-          .pendingCount=${this.pendingCount}
-        ></ss-placeholder-tile>
+        <div
+          class="import-tile"
+          role="button"
+          tabindex="0"
+          @click=${() => this._navigate('import')}
+          @keydown=${(e: KeyboardEvent) => e.key === 'Enter' && this._navigate('import')}
+        >
+          <div class="import-tile-left">
+            <span class="import-icon" aria-hidden="true">↑</span>
+            <div>
+              <div class="ss-text-body import-title">Import statement</div>
+              <div class="ss-text-caption import-caption">
+                ${this.pendingCount !== null && this.pendingCount > 0
+                  ? `${this.pendingCount} row${this.pendingCount !== 1 ? 's' : ''} pending review`
+                  : 'Upload a bank CSV, OFX, or XLSX file'}
+              </div>
+            </div>
+          </div>
+          ${this.pendingCount !== null && this.pendingCount > 0
+            ? html`<span class="pending-badge ss-text-caption">${this.pendingCount}</span>`
+            : ''}
+        </div>
 
         ${this._lastExpenseTile()}
       </div>
@@ -290,6 +305,50 @@ export class SsHomeView extends LitElement {
       .loading {
         padding: var(--ss-space-4);
         color: var(--secondary-text-color, #5a5a5a);
+      }
+      .import-tile {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: var(--ss-space-3);
+        padding: var(--ss-space-3) var(--ss-space-4);
+        background: var(--secondary-background-color, #f5f5f5);
+        border-radius: 10px;
+        cursor: pointer;
+        min-height: var(--ss-touch-min);
+        transition: background-color var(--ss-duration-fast) var(--ss-easing-standard);
+      }
+      .import-tile:hover {
+        background: color-mix(in srgb, var(--ss-accent-color) 10%, var(--secondary-background-color, #f5f5f5));
+      }
+      .import-tile:focus-visible {
+        outline: 2px solid var(--primary-color, #03a9f4);
+        outline-offset: 2px;
+      }
+      .import-tile-left {
+        display: flex;
+        align-items: center;
+        gap: var(--ss-space-3);
+      }
+      .import-icon {
+        font-size: 22px;
+        color: var(--ss-accent-color);
+        line-height: 1;
+      }
+      .import-title {
+        font-weight: 500;
+      }
+      .import-caption {
+        color: var(--secondary-text-color, #5a5a5a);
+      }
+      .pending-badge {
+        background: var(--ss-accent-color);
+        color: var(--text-primary-color, #ffffff);
+        border-radius: 10px;
+        padding: 2px var(--ss-space-2);
+        font-weight: 600;
+        min-width: 22px;
+        text-align: center;
       }
     `,
   ];

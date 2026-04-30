@@ -109,6 +109,71 @@ export interface Settlement {
   notes: string | null;
 }
 
+// ------------------------------------------------------------------ M5 types
+
+/** Staging row from splitsmart/list_staging. */
+export interface StagingRow {
+  id: string;
+  uploaded_by: string;
+  description: string | null;
+  amount: number;
+  currency: string;
+  date: string | null;
+  source_ref: string | null;
+  source_preset: string | null;
+  dedup_hash: string | null;
+  rule_id: string | null;
+  rule_action: 'pending' | 'always_split' | 'always_ignore' | 'review_each_time';
+  category_hint: string | null;
+  receipt_path: string | null;
+  notes: string | null;
+}
+
+/** Rule record from splitsmart/list_rules. */
+export interface RuleRecord {
+  id: string;
+  description: string | null;
+  /** Raw regex string, e.g. "netflix|spotify". */
+  pattern: string;
+  currency_match: string | null;
+  amount_min: string | null;
+  amount_max: string | null;
+  action: 'always_split' | 'always_ignore' | 'review_each_time';
+  category: string | null;
+  split: Record<string, unknown> | null;
+  priority: number;
+}
+
+/** File inspection result from splitsmart/inspect_upload. */
+export interface FileInspection {
+  upload_id: string;
+  filename: string;
+  file_format: string | null;
+  preset: string | null;
+  saved_mapping: Record<string, unknown> | null;
+  headers: string[];
+  sample_rows: string[][];
+  row_count: number;
+  file_origin_hash: string;
+}
+
+/** Per-column role for the column-mapping wizard. */
+export type ColumnRole =
+  | 'date'
+  | 'description'
+  | 'amount'
+  | 'debit'
+  | 'credit'
+  | 'currency'
+  | 'ignore';
+
+/** Full column mapping produced by the wizard. */
+export interface ColumnMapping {
+  columns: Record<string, ColumnRole>;
+  currency_default: string | null;
+  amount_sign: 'positive' | 'negative' | 'credit_debit';
+}
+
 /** Entry in the window.customCards gallery. */
 export interface CustomCardEntry {
   type: string;

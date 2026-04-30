@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+import aiofiles
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
@@ -20,6 +21,9 @@ from .ledger import (
     materialise_staging,
 )
 from .storage import SplitsmartStorage
+
+if TYPE_CHECKING:
+    from .rules import Rule
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,6 +63,7 @@ class SplitsmartCoordinator(DataUpdateCoordinator[SplitsmartData]):
         participants: list[str],
         home_currency: str,
         categories: list[str],
+        named_splits: dict[str, dict[str, Any]] | None = None,
         config_entry: Any = None,
     ) -> None:
         super().__init__(
@@ -72,6 +77,11 @@ class SplitsmartCoordinator(DataUpdateCoordinator[SplitsmartData]):
         self.participants = participants
         self.home_currency = home_currency
         self.categories = categories
+        self.named_splits: dict[str, dict[str, Any]] = named_splits or {}
+        # M5: rules loaded from rules.yaml. Updated by async_reload_rules().
+        self.rules: list[Rule] = []
+        self.rules_errors: list[str] = []
+        self.rules_loaded_at: datetime | None = None
 
     # DataUpdateCoordinator override — full replay every 5 min as a safety net.
     async def _async_update_data(self) -> SplitsmartData:
@@ -200,3 +210,39 @@ class SplitsmartCoordinator(DataUpdateCoordinator[SplitsmartData]):
             self.data.last_settlement_id = None
             self.data.last_tombstone_id = None
             self.data.last_staging_id_by_user = {}
+
+    async def async_reload_rules(self) -> None:
+        """Read rules.yaml from disk and update in-memory rules list.
+
+        Missing file is silently treated as an empty rules list. Parse errors
+        are logged at ERROR and the previous rule set is preserved on IO
+        failure, but replaced with a partial list on validation failures
+        (consistent with the recurring-entry strategy).
+        """
+        from .rules import load_rules
+
+        path = self.storage.rules_yaml_path
+        if not path.exists():
+            _LOGGER.debug("rules.yaml not found at %s — no rules configured", path)
+            self.rules = []
+            self.rules_errors = []
+            self.rules_loaded_at = datetime.now(tz=UTC)
+            self.async_update_listeners()
+            return
+
+        try:
+            async with aiofiles.open(path, encoding="utf-8") as fh:
+                yaml_text = await fh.read()
+        except OSError as err:
+            _LOGGER.error("Failed to read rules.yaml: %s", err)
+            return
+
+        rules, errors = load_rules(yaml_text, named_splits=self.named_splits)
+        for error in errors:
+            _LOGGER.error("rules.yaml: %s", error)
+
+        self.rules = rules
+        self.rules_errors = errors
+        self.rules_loaded_at = datetime.now(tz=UTC)
+        _LOGGER.info("rules.yaml loaded: %d rules, %d errors", len(rules), len(errors))
+        self.async_update_listeners()

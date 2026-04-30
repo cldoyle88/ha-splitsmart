@@ -17,6 +17,7 @@ from .cleanup import sweep_uploads
 from .const import (
     CONF_CATEGORIES,
     CONF_HOME_CURRENCY,
+    CONF_NAMED_SPLITS,
     CONF_PARTICIPANTS,
     DOMAIN,
 )
@@ -50,6 +51,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     participants: list[str] = entry.data[CONF_PARTICIPANTS]
     home_currency: str = entry.options.get(CONF_HOME_CURRENCY, entry.data[CONF_HOME_CURRENCY])
     categories: list[str] = entry.options.get(CONF_CATEGORIES, entry.data[CONF_CATEGORIES])
+    named_splits: dict = entry.options.get(
+        CONF_NAMED_SPLITS, entry.data.get(CONF_NAMED_SPLITS, {})
+    )
 
     coordinator = SplitsmartCoordinator(
         hass,
@@ -57,6 +61,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         participants=participants,
         home_currency=home_currency,
         categories=categories,
+        named_splits=named_splits,
         config_entry=entry,
     )
 
@@ -64,6 +69,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await coordinator.async_config_entry_first_refresh()
     except Exception as err:
         raise ConfigEntryNotReady(f"Failed initial ledger load: {err}") from err
+
+    # Load rules.yaml on startup (non-fatal if absent).
+    await coordinator.async_reload_rules()
 
     fx_client = FxClient(hass, storage)
 

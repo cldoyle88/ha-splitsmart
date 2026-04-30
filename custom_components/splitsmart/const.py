@@ -38,6 +38,7 @@ MAPPINGS_FILE = "mappings.jsonl"
 FX_RATES_FILE = "fx_rates.jsonl"
 RECURRING_YAML_FILE = "recurring.yaml"
 RECURRING_STATE_FILE = "recurring_state.jsonl"
+RULES_YAML_FILE = "rules.yaml"
 
 # JSONL record id prefixes
 ID_PREFIX_EXPENSE = "ex"
@@ -91,6 +92,8 @@ SERVICE_PROMOTE_STAGING = "promote_staging"
 SERVICE_SKIP_STAGING = "skip_staging"
 # M4 services
 SERVICE_MATERIALISE_RECURRING = "materialise_recurring"
+# M5 services
+SERVICE_APPLY_RULES = "apply_rules"
 
 # Coordinator
 COORDINATOR_UPDATE_INTERVAL_MINUTES = 5

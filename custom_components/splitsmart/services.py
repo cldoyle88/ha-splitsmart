@@ -16,6 +16,7 @@ from .const import (
     DOMAIN,
     SERVICE_ADD_EXPENSE,
     SERVICE_ADD_SETTLEMENT,
+    SERVICE_APPLY_RULES,
     SERVICE_DELETE_EXPENSE,
     SERVICE_DELETE_SETTLEMENT,
     SERVICE_EDIT_EXPENSE,
@@ -49,6 +50,7 @@ from .ledger import (
     validate_expense_record,
     validate_settlement_record,
 )
+from .rules import RuleParseError, build_match_payload, evaluate
 from .storage import new_id
 
 _LOGGER = logging.getLogger(__name__)
@@ -818,12 +820,114 @@ def _find_upload_path(storage: Any, upload_id: str) -> Any:
     )
 
 
+async def _try_auto_promote(
+    storage: Any,
+    staging_row: dict[str, Any],
+    *,
+    match: Any,
+    caller: str,
+    home_currency: str,
+    fx_client: FxClient,
+    named_splits: dict[str, Any],
+    participants: list[str],
+    known_cats: set[str],
+) -> bool:
+    """Attempt an auto-promote for an always_split rule match.
+
+    Returns True if the expense was written; False on FX or validation failure.
+    Staging row must already be on disk before this is called.
+    """
+    currency = staging_row["currency"]
+    try:
+        fx_rate, fx_date_str = await _resolve_fx(
+            fx_client,
+            currency=currency,
+            home_currency=home_currency,
+            date=staging_row["date"],
+            explicit_rate=None,
+            explicit_fx_date=None,
+        )
+    except ServiceValidationError as err:
+        _LOGGER.warning(
+            "Auto-promote staging %s deferred: FX unavailable (%s)",
+            staging_row["id"],
+            err,
+        )
+        return False
+
+    source_amount = float(staging_row["amount"])
+    total_home = (Decimal(str(source_amount)) * fx_rate).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
+
+    try:
+        payload = build_match_payload(
+            match,
+            home_currency=home_currency,
+            expense_amount=total_home,
+            named_splits=named_splits,
+        )
+    except RuleParseError as err:
+        _LOGGER.warning(
+            "Auto-promote staging %s deferred: rule payload error (%s)",
+            staging_row["id"],
+            err,
+        )
+        return False
+
+    if payload is None:
+        return False  # non-split action — caller shouldn't reach here
+
+    new_expense = build_expense_record(
+        date=staging_row["date"],
+        description=staging_row["description"],
+        paid_by=caller,
+        amount=source_amount,
+        currency=currency,
+        home_currency=home_currency,
+        categories=rescale_categories(payload["categories"], fx_rate, total_home),
+        notes=staging_row.get("notes"),
+        source=SOURCE_STAGING,
+        staging_id=staging_row["id"],
+        receipt_path=staging_row.get("receipt_path"),
+        created_by=caller,
+        fx_rate=fx_rate,
+        fx_date=fx_date_str,
+    )
+
+    try:
+        validate_expense_record(
+            new_expense,
+            participants=set(participants),
+            home_currency=home_currency,
+            known_categories=known_cats,
+        )
+    except SplitsmartValidationError as err:
+        _LOGGER.warning(
+            "Auto-promote staging %s deferred: validation failed (%s)",
+            staging_row["id"],
+            err,
+        )
+        return False
+
+    await storage.append(storage.expenses_path, new_expense)
+    await storage.append_tombstone(
+        created_by=caller,
+        target_type=TARGET_STAGING,
+        target_id=staging_row["id"],
+        operation=TOMBSTONE_PROMOTE,
+        previous_snapshot=staging_row,
+        replacement_id=new_expense["id"],
+    )
+    return True
+
+
 @_service_guard("import_file")
 async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
     from .importer import inspect_file
 
     data = IMPORT_FILE_SCHEMA(dict(call.data))
-    storage, coordinator, participants, home_currency, _ = _get_entry_data(call.hass)
+    storage, coordinator, participants, home_currency, known_cats = _get_entry_data(call.hass)
     caller = _resolve_caller(call, participants)
 
     upload_id: str = data["upload_id"]
@@ -862,9 +966,30 @@ async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
     staging_path = storage.staging_path(caller)
     blocked_foreign_currency = 0
     extension = path.suffix.lstrip(".").lower()
+    fx_client = _get_fx_client(call.hass)
+    rules = coordinator.rules
+    named_splits = coordinator.named_splits
+
+    # Rule evaluation counters.
+    auto_promoted = 0
+    auto_ignored = 0
+    auto_review = 0
+    still_pending = 0
 
     for row in to_import:
         currency = row["currency"]
+        row_match = evaluate(
+            {"description": row["description"], "amount": row["amount"], "currency": currency},
+            rules,
+        )
+        rule_id: str | None = row_match.rule.id if row_match else None
+        rule_action: str = row_match.rule.action if row_match else "pending"
+        category_hint: str | None = (
+            row_match.rule.category
+            if row_match and row_match.rule.action == "review_each_time"
+            else row.get("category_hint")
+        )
+
         record: dict[str, Any] = {
             "id": new_id("st"),
             "uploaded_by": caller,
@@ -877,9 +1002,9 @@ async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
             "description": row["description"],
             "amount": round(float(row["amount"]), 2),
             "currency": currency,
-            "rule_action": "pending",
-            "rule_id": None,
-            "category_hint": row.get("category_hint"),
+            "rule_action": rule_action,
+            "rule_id": rule_id,
+            "category_hint": category_hint,
             "dedup_hash": dedup_hash(
                 date=row["date"],
                 amount=float(row["amount"]),
@@ -892,6 +1017,37 @@ async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
         await storage.append(staging_path, record)
         if currency != home_currency:
             blocked_foreign_currency += 1
+
+        # Apply rule action after staging write — staging row is the audit trail.
+        if rule_action == "always_split" and row_match is not None:
+            promoted = await _try_auto_promote(
+                storage,
+                record,
+                match=row_match,
+                caller=caller,
+                home_currency=home_currency,
+                fx_client=fx_client,
+                named_splits=named_splits,
+                participants=participants,
+                known_cats=known_cats,
+            )
+            if promoted:
+                auto_promoted += 1
+            else:
+                still_pending += 1
+        elif rule_action == "always_ignore" and row_match is not None:
+            await storage.append_tombstone(
+                created_by=caller,
+                target_type=TARGET_STAGING,
+                target_id=record["id"],
+                operation=TOMBSTONE_DISCARD,
+                previous_snapshot=record,
+            )
+            auto_ignored += 1
+        elif rule_action == "review_each_time":
+            auto_review += 1
+        else:
+            still_pending += 1
 
     # Persist the user's mapping for next-month frictionless re-import. Only
     # when the caller supplied an explicit mapping — preset matches don't
@@ -912,6 +1068,10 @@ async def _handle_import_file(call: ServiceCall) -> dict[str, Any]:
         "parse_errors": len(outcome.errors),
         "blocked_foreign_currency": blocked_foreign_currency,
         "preset": preset_name,
+        "auto_promoted": auto_promoted,
+        "auto_ignored": auto_ignored,
+        "auto_review": auto_review,
+        "still_pending": still_pending,
     }
     if outcome.errors:
         response["first_error_hint"] = outcome.errors[0].message
@@ -977,6 +1137,152 @@ async def _handle_materialise_recurring(call: ServiceCall) -> dict[str, Any]:
 
 
 # ------------------------------------------------------------------ registration
+
+
+# ---- M5 apply_rules ----
+
+APPLY_RULES_SCHEMA = vol.Schema(
+    {
+        vol.Optional("user_id"): vol.Any(None, cv.string),
+    }
+)
+
+
+@_service_guard("apply_rules")
+async def _handle_apply_rules(call: ServiceCall) -> dict[str, Any]:
+    """Re-run rule evaluation against pending staging rows for the caller."""
+    data = APPLY_RULES_SCHEMA(dict(call.data))
+    storage, coordinator, participants, home_currency, known_cats = _get_entry_data(call.hass)
+    caller = _resolve_caller(call, participants)
+
+    # Admins may target another participant; non-admins must target themselves.
+    target_user: str = data.get("user_id") or caller
+    if target_user != caller:
+        user = await call.hass.auth.async_get_user(caller)
+        if user is None or not user.is_admin:
+            raise ServiceValidationError("permission_denied")
+
+    rules = coordinator.rules
+    named_splits = coordinator.named_splits
+    fx_client = _get_fx_client(call.hass)
+
+    staging_rows = coordinator.data.staging_by_user.get(target_user, [])
+    staging_path = storage.staging_path(target_user)
+
+    auto_promoted = 0
+    auto_ignored = 0
+    auto_review = 0
+    still_pending = 0
+
+    for old_row in staging_rows:
+        rule_action = old_row.get("rule_action", "pending")
+        existing_rule_id = old_row.get("rule_id")
+
+        if rule_action == "always_split" and existing_rule_id:
+            # FX-retry path: rule already matched but FX was unavailable.
+            rule = next((r for r in rules if r.id == existing_rule_id), None)
+            if rule is None:
+                _LOGGER.warning(
+                    "apply_rules: staging %s has rule_id %s which no longer exists — left pending",
+                    old_row["id"],
+                    existing_rule_id,
+                )
+                still_pending += 1
+                continue
+            from .rules import RuleMatch
+
+            match = RuleMatch(rule=rule)
+            promoted = await _try_auto_promote(
+                storage,
+                old_row,
+                match=match,
+                caller=target_user,
+                home_currency=home_currency,
+                fx_client=fx_client,
+                named_splits=named_splits,
+                participants=participants,
+                known_cats=known_cats,
+            )
+            if promoted:
+                auto_promoted += 1
+            else:
+                still_pending += 1
+            continue
+
+        if rule_action != "pending":
+            # review_each_time, or already-ignored rows — not a target for re-evaluation.
+            continue
+
+        # First-time evaluation: evaluate rules and apply edit-tombstone pattern.
+        match = evaluate(
+            {
+                "description": old_row.get("description", ""),
+                "amount": old_row.get("amount"),
+                "currency": old_row.get("currency", ""),
+            },
+            rules,
+        )
+        if match is None:
+            still_pending += 1
+            continue
+
+        # Append new staging row with updated rule fields, then tombstone the old one.
+        new_row: dict[str, Any] = {
+            **old_row,
+            "id": new_id("st"),
+            "rule_id": match.rule.id,
+            "rule_action": match.rule.action,
+        }
+        if match.rule.action == "review_each_time" and match.rule.category:
+            new_row["category_hint"] = match.rule.category
+
+        await storage.append(staging_path, new_row)
+        await storage.append_tombstone(
+            created_by=target_user,
+            target_type=TARGET_STAGING,
+            target_id=old_row["id"],
+            operation=TOMBSTONE_EDIT,
+            previous_snapshot=old_row,
+            replacement_id=new_row["id"],
+        )
+
+        if match.rule.action == "always_split":
+            promoted = await _try_auto_promote(
+                storage,
+                new_row,
+                match=match,
+                caller=target_user,
+                home_currency=home_currency,
+                fx_client=fx_client,
+                named_splits=named_splits,
+                participants=participants,
+                known_cats=known_cats,
+            )
+            if promoted:
+                auto_promoted += 1
+            else:
+                still_pending += 1
+        elif match.rule.action == "always_ignore":
+            await storage.append_tombstone(
+                created_by=target_user,
+                target_type=TARGET_STAGING,
+                target_id=new_row["id"],
+                operation=TOMBSTONE_DISCARD,
+                previous_snapshot=new_row,
+            )
+            auto_ignored += 1
+        elif match.rule.action == "review_each_time":
+            auto_review += 1
+
+    if auto_promoted + auto_ignored + auto_review > 0:
+        await coordinator.async_note_write(staging_user_id=target_user)
+
+    return {
+        "auto_promoted": auto_promoted,
+        "auto_ignored": auto_ignored,
+        "auto_review": auto_review,
+        "still_pending": still_pending,
+    }
 
 
 def async_register_services(hass: HomeAssistant) -> None:
@@ -1048,6 +1354,13 @@ def async_register_services(hass: HomeAssistant) -> None:
         DOMAIN,
         SERVICE_MATERIALISE_RECURRING,
         _handle_materialise_recurring,
+        schema=None,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_APPLY_RULES,
+        _handle_apply_rules,
         schema=None,
         supports_response=SupportsResponse.OPTIONAL,
     )

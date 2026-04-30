@@ -21,6 +21,7 @@ from .const import (
     RECEIPTS_DIR,
     RECURRING_STATE_FILE,
     RECURRING_YAML_FILE,
+    RULES_YAML_FILE,
     SETTLEMENTS_FILE,
     SHARED_DIR,
     STAGING_DIR,
@@ -129,6 +130,10 @@ class SplitsmartStorage:
     @property
     def recurring_yaml_path(self) -> pathlib.Path:
         return self._root / RECURRING_YAML_FILE
+
+    @property
+    def rules_yaml_path(self) -> pathlib.Path:
+        return self._root / RULES_YAML_FILE
 
     @property
     def recurring_state_path(self) -> pathlib.Path:

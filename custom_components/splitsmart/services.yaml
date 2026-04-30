@@ -395,3 +395,23 @@ materialise_recurring:
       example: "netflix"
       selector:
         text:
+
+apply_rules:
+  name: Apply rules
+  description: >
+    Re-evaluate rules.yaml against all pending staging rows for the caller.
+    Rows that match an always_split rule are auto-promoted to the shared ledger;
+    rows matching always_ignore are discarded; rows matching review_each_time
+    receive a category hint. Foreign-currency always_split rows are promoted
+    only when FX is reachable — call again once connectivity returns.
+    Returns counts of auto_promoted, auto_ignored, auto_review, and still_pending.
+  fields:
+    user_id:
+      name: User ID
+      description: >
+        HA user ID whose staging rows to process. Defaults to the calling user.
+        Admins may pass another participant's user_id; non-admin callers
+        attempting this receive permission_denied.
+      required: false
+      selector:
+        text:

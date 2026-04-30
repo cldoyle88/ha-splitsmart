@@ -51,9 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     participants: list[str] = entry.data[CONF_PARTICIPANTS]
     home_currency: str = entry.options.get(CONF_HOME_CURRENCY, entry.data[CONF_HOME_CURRENCY])
     categories: list[str] = entry.options.get(CONF_CATEGORIES, entry.data[CONF_CATEGORIES])
-    named_splits: dict = entry.options.get(
-        CONF_NAMED_SPLITS, entry.data.get(CONF_NAMED_SPLITS, {})
-    )
+    named_splits: dict = entry.options.get(CONF_NAMED_SPLITS, entry.data.get(CONF_NAMED_SPLITS, {}))
 
     coordinator = SplitsmartCoordinator(
         hass,
@@ -112,6 +110,24 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     cleanup_unsub = async_track_time_interval(hass, _cleanup, timedelta(hours=1))
     entry.async_on_unload(cleanup_unsub)
+
+    # 30-second poll for rules.yaml changes. Keeps the rules list current
+    # without requiring an integration reload when the user edits the file.
+    _rules_mtime: float | None = None
+
+    async def _check_rules_yaml(_now: dt.datetime) -> None:
+        nonlocal _rules_mtime
+        path = storage.rules_yaml_path
+        try:
+            mtime = path.stat().st_mtime if path.exists() else None
+        except OSError:
+            return
+        if mtime != _rules_mtime:
+            _rules_mtime = mtime
+            await coordinator.async_reload_rules()
+
+    rules_watcher_unsub = async_track_time_interval(hass, _check_rules_yaml, timedelta(seconds=30))
+    entry.async_on_unload(rules_watcher_unsub)
 
     # Daily 03:00 recurring materialisation — catches up any due dates since
     # the last run and writes new expense records to the shared ledger.
